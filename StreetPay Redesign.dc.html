@@ -25,35 +25,7 @@ a{color:#56B84B;text-decoration:none}a:hover{color:#8ad47e}
 @keyframes rise{0%{transform:translateY(14px);opacity:0}100%{transform:translateY(0);opacity:1}}
 </style>
 </helmet>
-<div onClick="{{ onTap }}" style="min-height:100vh;padding:28px 24px 40px;display:flex;flex-direction:column;align-items:center;gap:22px">
-  <div style="width:100%;max-width:920px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:12px">
-      <img src="assets/streetpay-mark.png" alt="StreetPay" style="width:46px;height:34px;object-fit:contain;flex:none" />
-      <!-- <div>
-        <div style="color:#fff;font-size:15px;font-weight:700;letter-spacing:-.2px">StreetPay — Flutter redesign</div>
-        <div style="color:#7c8a80;font-size:12px;font-weight:500">Clickable prototype · 412×892 · tap through the flows</div>
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <div data-go="onboard" style="padding:7px 13px;border-radius:999px;background:#2b4a34;color:#e6f6e6;font-size:12px;font-weight:700;cursor:pointer" style-hover="background:#356045;color:#fff">Onboarding &amp; sign up</div>
-      <div data-go="idnum" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Details form</div>
-      <div data-go="details" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">KYC consent</div>
-      <div data-go="ready" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Wallet live</div>
-      <div data-go="home" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Home</div>
-      <div data-go="discover" style="padding:7px 13px;border-radius:999px;background:#2b4a34;color:#e6f6e6;font-size:12px;font-weight:700;cursor:pointer" style-hover="background:#356045;color:#fff">Discover nearby</div>
-      <div data-go="send" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Send</div>
-      <div data-go="bills" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Bill requests</div>
-      <div data-go="createbill" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Create a bill</div>
-      <div data-go="wallet" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Wallet</div>
-      <div data-go="tiers" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Tiers / KYC</div>
-      <div data-go="history" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Activity</div>
-      <div data-go="earn" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Earn</div>
-      <div data-go="profile" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Me</div>
-      <div data-go="login" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Sign in</div>
-      <div data-go="games" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Games</div>
-      <div data-go="speaks" style="padding:7px 13px;border-radius:999px;background:#1a251e;color:#c8d5cc;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#24332a;color:#fff">Smart Discovery</div>
-    </div>
-  </div> -->
+<div onClick="{{ onTap }}" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center">
 
   <div style="display:flex;justify-content:center">
     <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" width="412px" height="892px" hint-size="412px,892px">
