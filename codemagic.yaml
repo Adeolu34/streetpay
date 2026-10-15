@@ -7,13 +7,17 @@ workflows:
     integrations:
       app_store_connect: streetpay
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.streetpayngr.smartapp
       flutter: stable
       xcode: latest
       cocoapods: default
     scripts:
+      - name: Set up keychain to be able to sign
+        script: keychain initialize
+      - name: Fetch signing files from Apple Developer
+        script: |
+          app-store-connect fetch-signing-files "com.streetpayngr.smartapp" \
+            --type IOS_APP_STORE \
+            --create
       - name: Set up code signing settings on Xcode project
         script: xcode-project use-profiles
       - name: Get Flutter packages
