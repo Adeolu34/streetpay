@@ -4,6 +4,8 @@ workflows:
     instance_type: mac_mini_m1
     max_build_duration: 60
     working_directory: streetpay
+    integrations:
+      app_store_connect: streetpay
     environment:
       ios_signing:
         distribution_type: app_store
