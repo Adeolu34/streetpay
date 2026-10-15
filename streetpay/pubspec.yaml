@@ -148,7 +148,6 @@ dependencies:
     git:
       url: https://github.com/FlutterFlow/webviewx_plus.git
       ref: 4f84ece5e06d52643c5d844f41880baf8440c584
-  workmanager: ^0.8.0
   youtube_player_flutter: ^9.1.1
 
   # The following adds the Cupertino Icons font to your application.
