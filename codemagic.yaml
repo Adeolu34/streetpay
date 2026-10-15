@@ -10,7 +10,7 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.streetpayngr.app
-      flutter: 3.24.5
+      flutter: 3.41.9
       xcode: 16.0
       cocoapods: default
     scripts:
