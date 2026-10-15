@@ -1,0 +1,40 @@
+# Build outputs
+*.aab
+*.apk
+*.ipa
+streetpay-release.aab
+streetpay-release.apk
+
+# Flutter & dependencies
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.pub/
+
+# Android & Keystores
+**/android/.gradle/
+**/android/local.properties
+*.jks
+*.keystore
+key.properties
+
+# iOS CocoaPods & frameworks
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/Flutter.framework
+**/ios/Runner.xcworkspace/xcuserdata/
+
+# Agent & temporary tools
+.agents/
+.claude/
+.venv/
+.mcp.json
+skills-lock.json
+screen.png
+screen2.png
+current_screen.png
+brag-landscape/
+brag-vertical/

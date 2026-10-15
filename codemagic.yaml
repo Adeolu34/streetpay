@@ -1,0 +1,35 @@
+workflows:
+  ios-release:
+    name: iOS Release to App Store
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    working_directory: streetpay
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.streetpayngr.smartapp
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: xcode-project use-profiles
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+          cd ..
+      - name: Flutter build ipa
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - streetpay/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

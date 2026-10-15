@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>streetPay</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>streetPay</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLName</key>
+        <string>streetpayngr.smartapp</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>streetpay</string>
+        </array>
+      </dict>
+    </array>
+    <key>FlutterDeepLinkingEnabled</key>
+    <true/>
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>StreetPay needs access to your current location while the app is in use to help you find nearby agents, merchants, and services, and to calculate accurate delivery or service charges.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>StreetPay requires continuous location access, even when the app is running in the background, to verify payment locations in real time, detect fraudulent activities, and help you discover nearby service points instantly.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>StreetPay needs access to your camera so you can scan QR codes for payments, capture transaction receipts, take profile photos, or submit ID documents for account verification.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Our app allows users to verify and update their profile by uploading photos or videos. These media files are encrypted on the device before upload to protect user privacy. This operation is infrequent and occurs only at user request.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>StreetPay uses Face ID to securely verify your identity before processing sensitive actions such as authorizing payments, accessing account settings, or confirming withdrawals.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>StreetPay needs Bluetooth access to detect and connect with nearby payment devices, card readers, and compatible terminals for faster in-person transactions.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>StreetPay uses Bluetooth to pair with peripheral devices such as card readers, printers, and nearby merchant systems to process transactions securely and efficiently.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>StreetPay needs access to your contacts so you can quickly send or request money from people you know without manually entering their phone numbers or account details.</string>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+      <string>UIInterfaceOrientationPortrait</string>
+      <string>UIInterfaceOrientationLandscapeLeft</string>
+      <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+      <string>UIInterfaceOrientationPortrait</string>
+      <string>UIInterfaceOrientationPortraitUpsideDown</string>
+      <string>UIInterfaceOrientationLandscapeLeft</string>
+      <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <false/>
+  </dict>
+</plist>

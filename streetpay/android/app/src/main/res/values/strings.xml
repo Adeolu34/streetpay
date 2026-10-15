@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<resources>
+    <string name="app_name">streetpay</string>
+    <string name="media_permission_note">Our app allows users to verify and update their profile by uploading photos or videos. These media files are encrypted on the device before upload to protect user privacy. This operation is infrequent and occurs only at user request.</string>
+</resources>

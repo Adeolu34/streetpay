@@ -1,0 +1,1226 @@
+╭─── Claude Code v2.1.122 ─────────────────────────────────────────────────────╮
+│                                               │ Tips for getting started     │
+│           Welcome back John Adeolu!           │ Run /init to create a CLAUD… │
+│                                               │ ──────────────────────────── │
+│                    ▐▛███▜▌                    │ What's new                   │
+│                   ▝▜█████▛▘                   │ The `/model` picker now lis… │
+│                     ▘▘ ▝▝                     │ - Added `claude project pur… │
+│                                               │ `--dangerously-skip-permiss… │
+│   Sonnet 4.6 · Claude Team · AOF Foundation   │ /release-notes for more      │
+│        ~\Downloads\streetpay\streetpay        │                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Referenced file lib\pages\profile\upgradetotier3\upgradetotier3_widget.dart
+  ⎿  Referenced file lib\pages\profile\upgradetotier2\upgradetotier2_widget.dart
+  ⎿  Read lib\custom_code\widgets\signature_pad_widget.dart (277 lines)
+  ⎿  Referenced file lib\app_state.dart
+  ⎿  Read lib\components\visit_feedback_modal_widget.dart (391 lines)
+
+● Let me read the files needed to implement OTP auto-capture.
+
+  Searched for 2 patterns, read 2 files (ctrl+o to expand)
+
+● I need to see the AndroidManifest.xml to add the SMS permission, then
+  implement the SMS listener in both OTP widgets.
+
+  Read 1 file (ctrl+o to expand)
+
+● Now I have everything I need. Let me implement OTP auto-capture in all three
+  places: AndroidManifest, phone_verification_widget.dart, and
+  phonere_verification_widget.dart.
+
+● Update(android\app\src\main\AndroidManifest.xml)
+  ⎿  Added 2 lines
+       9    <uses-permission android:name="android.permission.CALL_PHONE"
+          />
+      10    <uses-permission android:name="android.permission.READ_PHONE_
+          STATE"/>
+      11    <uses-permission android:name="android.permission.RECORD_AUDI
+          O"/>
+      12 +  <uses-permission android:name="android.permission.RECEIVE_SMS
+         +"/>                                                            
+      13 +  <uses-permission android:name="android.permission.READ_SMS"/>
+      14    <application
+      15      android:label="streetpay"
+      16      tools:replace="android:label"
+
+● Now update phone_verification_widget.dart to add the SMS listener:
+
+● Update(lib\pages\onboarding\phone_verification\phone_verification_widget.dart)
+  ⎿  Added 1 line
+       6  import 'package:flutter/material.dart';
+       7  import 'package:google_fonts/google_fonts.dart';
+       8  import 'package:provider/provider.dart';
+       9 +import 'package:telephony/telephony.dart';                     
+      10  import 'phone_verification_model.dart';
+      11  export 'phone_verification_model.dart';
+      12  
+
+● Update(lib\pages\onboarding\phone_verification\phone_verification_widget.dart)
+  ⎿  Added 18 lines
+      40    final scaffoldKey = GlobalKey<ScaffoldState>();
+      41    String _otpCode = '';
+      42    bool _isVerifying = false;
+      43 +  final Telephony _telephony = Telephony.instance;             
+      44  
+      45    // Resend countdown — 60 seconds before allowing retry
+      46    static const int _resendCooldownSecs = 60;
+     ...
+      53      _model = createModel(context, () => PhoneVerificationModel(
+          ));
+      54      _model.timerController.onStartTimer();
+      55      _startCountdown();
+      56 +    _startSmsListener();                                       
+      57    }
+      58  
+      59 +  void _startSmsListener() {                                   
+      60 +    _telephony.listenIncomingSms(                              
+      61 +      onNewMessage: (SmsMessage message) {                     
+      62 +        if (!mounted || _isVerifying || _otpCode.length == 6) r
+         +eturn;                                                         
+      63 +        final body = message.body ?? '';                       
+      64 +        final match = RegExp(r'\b(\d{6})\b').firstMatch(body); 
+      65 +        if (match != null) {                                   
+      66 +          final otp = match.group(1)!;                         
+      67 +          setState(() => _otpCode = otp);                      
+      68 +          _verifyOtp();                                        
+      69 +        }                                                      
+      70 +      },                                                       
+      71 +      listenInBackground: false,                               
+      72 +    );                                                         
+      73 +  }                                                            
+      74 +                                                               
+      75    void _startCountdown() {
+      76      _countdownTimer?.cancel();
+      77      setState(() => _resendCountdown = _resendCooldownSecs);
+
+● Now update phonere_verification_widget.dart — extract the inline verification
+  logic to a method and add the SMS listener:
+
+● Update(lib\pages\onboarding\phonere_verification\phonere_verification_widget.d
+        art)
+  ⎿  Added 1 line
+      10  import 'package:flutter/material.dart';
+      11  import 'package:google_fonts/google_fonts.dart';
+      12  import 'package:provider/provider.dart';
+      13 +import 'package:telephony/telephony.dart';                     
+      14  import 'phonere_verification_model.dart';
+      15  export 'phonere_verification_model.dart';
+      16  
+
+● Update(lib\pages\onboarding\phonere_verification\phonere_verification_widget.d
+        art)
+  ⎿  Added 105 lines, removed 2 lines
+      32  
+      33  class _PhonereVerificationWidgetState extends State<PhonereVeri
+          ficationWidget> {
+      34    late PhonereVerificationModel _model;
+      35 -                                                               
+      35    final scaffoldKey = GlobalKey<ScaffoldState>();
+      36 +  final Telephony _telephony = Telephony.instance;             
+      37 +  bool _isVerifying = false;                                   
+      38  
+      39    @override
+      40    void initState() {
+     ...
+       48        },
+       49      );
+       50      WidgetsBinding.instance.addPostFrameCallback((_) => safeSe
+           tState(() {}));
+       51 +    _startSmsListener();                                      
+       52    }
+       53  
+       54    @override
+       55    void dispose() {
+       56      _model.dispose();
+       55 -                                                              
+       57      super.dispose();
+       58    }
+       59  
+       60 +  void _startSmsListener() {                                  
+       61 +    _telephony.listenIncomingSms(                             
+       62 +      onNewMessage: (SmsMessage message) {                    
+       63 +        if (!mounted || _isVerifying) return;                 
+       64 +        final body = message.body ?? '';                      
+       65 +        final match = RegExp(r'\b(\d{6})\b').firstMatch(body);
+       66 +        if (match != null) {                                  
+       67 +          final otp = match.group(1)!;                        
+       68 +          safeSetState(() {                                   
+       69 +            _model.pinCodeController?.text = otp;             
+       70 +          });                                                 
+       71 +          _verifyOtp(otp);                                    
+       72 +        }                                                     
+       73 +      },                                                      
+       74 +      listenInBackground: false,                              
+       75 +    );                                                        
+       76 +  }                                                           
+       77 +                                                              
+       78 +  Future<void> _verifyOtp(String otp) async {                 
+       79 +    if (_isVerifying) return;                                 
+       80 +    setState(() => _isVerifying = true);                      
+       81 +    try {                                                     
+       82 +      _model.streetauth = await StreetauthCall.call();        
+       83 +                                                              
+       84 +      _model.apiResult11q = await ReverifyotpCall.call(       
+       85 +        phone: functions.removecode(widget.phoneNumber),      
+       86 +        accessToken: StreetauthCall.streettoken(              
+       87 +          (_model.streetauth?.jsonBody ?? ''),                
+       88 +        ),                                                    
+       89 +        otp: otp,                                             
+       90 +      );                                                      
+       91 +                                                              
+       92 +      if (ReverifyotpCall.status((_model.apiResult11q?.jsonBod
+          +y ?? '')) == true) {                                          
+       93 +        FFAppState().phonenumber = functions.removecode(widget
+          +.phoneNumber)!;                                               
+       94 +        safeSetState(() {});                                  
+       95 +        _model.teirprofile = await ReturntierprofileCall.call(
+       96 +          phoneno: functions.removecode(functions.removecode(w
+          +idget.phoneNumber) ?? '') ?? '',                              
+       97 +          accessToken: StreetauthCall.streettoken(            
+       98 +            (_model.streetauth?.jsonBody ?? ''),              
+       99 +          ),                                                  
+      100 +        );                                                    
+      101 +                                                              
+      102 +        final isSuccess = ReturntierprofileCall.success((_mode
+          +l.teirprofile?.jsonBody ?? '')) == true;                      
+      103 +        final isSecurityStatus = ReturntierprofileCall.securit
+          +ystatus((_model.teirprofile?.jsonBody ?? '')) == true;        
+      104 +                                                              
+      105 +        if (!isSuccess) {                                     
+      106 +          if (mounted) {                                      
+      107 +            context.pushNamed(                                
+      108 +              EmptyProfileWidget.routeName,                   
+      109 +              queryParameters: {                              
+      110 +                'phoneno': serializeParam(widget.phoneNumber, 
+          +ParamType.String),                                            
+      111 +              }.withoutNulls,                                 
+      112 +            );                                                
+      113 +          }                                                   
+      114 +        } else {                                              
+      115 +          FFAppState().accountno = ReturntierprofileCall.accou
+          +ntNo((_model.teirprofile?.jsonBody ?? '')) ?? '';             
+      116 +          FFAppState().accountname = ReturntierprofileCall.oth
+          +ername((_model.teirprofile?.jsonBody ?? '')) ?? '';           
+      117 +          FFAppState().walletid = ReturntierprofileCall.wallet
+          +ID((_model.teirprofile?.jsonBody ?? '')) ?? '';               
+      118 +          safeSetState(() {});                                
+      119 +                                                              
+      120 +          if (isSecurityStatus) {                             
+      121 +            FFAppState().accountno = ReturntierprofileCall.acc
+          +ountNo((_model.teirprofile?.jsonBody ?? '')) ?? '';           
+      122 +            FFAppState().phonenumber = functions.removecode(wi
+          +dget.phoneNumber) ?? '';                                      
+      123 +            FFAppState().walletid = ReturntierprofileCall.wall
+          +etID((_model.teirprofile?.jsonBody ?? '')) ?? '';             
+      124 +            FFAppState().tier = '1';                          
+      125 +            FFAppState().accountname = ReturntierprofileCall.f
+          +ullname((_model.teirprofile?.jsonBody ?? '')) ?? '';          
+      126 +            safeSetState(() {});                              
+      127 +            if (mounted) context.pushNamed(NewhomeWidget.route
+          +Name);                                                        
+      128 +          } else {                                            
+      129 +            if (mounted) {                                    
+      130 +              context.pushNamed(                              
+      131 +                QuestionaireWidget.routeName,                 
+      132 +                queryParameters: {                            
+      133 +                  'phone': serializeParam(functions.removecode
+          +(widget.phoneNumber), ParamType.String),                      
+      134 +                }.withoutNulls,                               
+      135 +              );                                              
+      136 +            }                                                 
+      137 +          }                                                   
+      138 +        }                                                     
+      139 +      } else {                                                
+      140 +        if (mounted) {                                        
+      141 +          ScaffoldMessenger.of(context).showSnackBar(         
+      142 +            SnackBar(                                         
+      143 +              content: Text(                                  
+      144 +                'Invalid OTP',                                
+      145 +                style: TextStyle(color: FlutterFlowTheme.of(co
+          +ntext).primaryBackground),                                    
+      146 +              ),                                              
+      147 +              duration: const Duration(milliseconds: 4000),   
+      148 +              backgroundColor: FlutterFlowTheme.of(context).se
+          +condary,                                                      
+      149 +            ),                                                
+      150 +          );                                                  
+      151 +          safeSetState(() {                                   
+      152 +            _model.pinCodeController?.clear();                
+      153 +          });                                                 
+      154 +        }                                                     
+      155 +      }                                                       
+      156 +    } finally {                                               
+      157 +      if (mounted) setState(() => _isVerifying = false);      
+      158 +    }                                                         
+      159 +    safeSetState(() {});                                      
+      160 +  }                                                           
+      161 +                                                              
+      162    @override
+      163    Widget build(BuildContext context) {
+      164      context.watch<FFAppState>();
+
+● Now replace the inline onCompleted logic to call the extracted _verifyOtp
+  method:
+
+● Update(lib\pages\onboarding\phonere_verification\phonere_verification_widget.d
+        art)
+  ⎿  Added 2 lines, removed 119 lines
+      308                      ),
+      309                      controller: _model.pinCodeController,
+      310                      onChanged: (_) {},
+      311 -                    onCompleted: (_) async {                  
+      312 -                      _model.streetauth = await StreetauthCall
+          -.call();                                                      
+      313 -                                                              
+      314 -                      _model.apiResult11q = await ReverifyotpC
+          -all.call(                                                     
+      315 -                        phone: functions.removecode(widget.pho
+          -neNumber),                                                    
+      316 -                        accessToken: StreetauthCall.streettoke
+          -n(                                                            
+      317 -                          (_model.streetauth?.jsonBody ?? ''),
+      318 -                        ),                                    
+      319 -                        otp: _model.pinCodeController!.text,  
+      320 -                      );                                      
+      321 -                                                              
+      322 -                      if (ReverifyotpCall.status(             
+      323 -                            (_model.apiResult11q?.jsonBody ?? 
+          -''),                                                          
+      324 -                          ) ==                                
+      325 -                          true) {                             
+      326 -                        FFAppState().phonenumber =            
+      327 -                            functions.removecode(widget.phoneN
+          -umber)!;                                                      
+      328 -                        safeSetState(() {});                  
+      329 -                        _model.teirprofile = await Returntierp
+          -rofileCall.call(                                              
+      330 -                          phoneno: functions.removecode(      
+      331 -                              functions.removecode(widget.phon
+          -eNumber) ?? '') ?? '',                                        
+      332 -                          accessToken: StreetauthCall.streetto
+          -ken(                                                          
+      333 -                            (_model.streetauth?.jsonBody ?? ''
+          -),                                                            
+      334 -                          ),                                  
+      335 -                        );                                    
+      336 -                                                              
+      337 -                        final isSuccess = ReturntierprofileCal
+          -l.success(                                                    
+      338 -                              (_model.teirprofile?.jsonBody ??
+          - ''),                                                         
+      339 -                            ) ==                              
+      340 -                            true;                             
+      341 -                        final isSecurityStatus =              
+      342 -                            ReturntierprofileCall.securitystat
+          -us(                                                           
+      343 -                                  (_model.teirprofile?.jsonBod
+          -y ?? ''),                                                     
+      344 -                                ) ==                          
+      345 -                                true;                         
+      346 -                                                              
+      347 -                        if (!isSuccess) {                     
+      348 -                          context.pushNamed(                  
+      349 -                            EmptyProfileWidget.routeName,     
+      350 -                            queryParameters: {                
+      351 -                              'phoneno': serializeParam(      
+      352 -                                widget.phoneNumber,           
+      353 -                                ParamType.String,             
+      354 -                              ),                              
+      355 -                            }.withoutNulls,                   
+      356 -                          );                                  
+      357 -                        } else {                              
+      358 -                          FFAppState().accountno =            
+      359 -                              ReturntierprofileCall.accountNo(
+      360 -                                    (_model.teirprofile?.jsonB
+          -ody ?? ''),                                                   
+      361 -                                  ) ??                        
+      362 -                                  '';                         
+      363 -                          FFAppState().accountname =          
+      364 -                              ReturntierprofileCall.othername(
+      365 -                                    (_model.teirprofile?.jsonB
+          -ody ?? ''),                                                   
+      366 -                                  ) ??                        
+      367 -                                  '';                         
+      368 -                          FFAppState().walletid =             
+      369 -                              ReturntierprofileCall.walletID( 
+      370 -                                    (_model.teirprofile?.jsonB
+          -ody ?? ''),                                                   
+      371 -                                  ) ??                        
+      372 -                                  '';                         
+      373 -                          safeSetState(() {});                
+      374 -                                                              
+      375 -                          if (isSecurityStatus) {             
+      376 -                            FFAppState().accountno =          
+      377 -                                ReturntierprofileCall.accountN
+          -o(                                                            
+      378 -                                      (_model.teirprofile?.jso
+          -nBody ?? ''),                                                 
+      379 -                                    ) ??                      
+      380 -                                    '';                       
+      381 -                            FFAppState().phonenumber =        
+      382 -                                functions.removecode(widget.ph
+          -oneNumber) ?? '';                                             
+      383 -                            FFAppState().walletid =           
+      384 -                                ReturntierprofileCall.walletID
+          -(                                                             
+      385 -                                      (_model.teirprofile?.jso
+          -nBody ?? ''),                                                 
+      386 -                                    ) ??                      
+      387 -                                    '';                       
+      388 -                            FFAppState().tier = '1';          
+      389 -                            FFAppState().accountname =        
+      390 -                                ReturntierprofileCall.fullname
+          -(                                                             
+      391 -                                      (_model.teirprofile?.jso
+          -nBody ?? ''),                                                 
+      392 -                                    ) ??                      
+      393 -                                    '';                       
+      394 -                            safeSetState(() {});              
+      395 -                                                              
+      396 -                            context.pushNamed(NewhomeWidget.ro
+          -uteName);                                                     
+      397 -                          } else {                            
+      398 -                            context.pushNamed(                
+      399 -                              QuestionaireWidget.routeName,   
+      400 -                              queryParameters: {              
+      401 -                                'phone': serializeParam(      
+      402 -                                  functions.removecode(widget.
+          -phoneNumber),                                                 
+      403 -                                  ParamType.String,           
+      404 -                                ),                            
+      405 -                              }.withoutNulls,                 
+      406 -                            );                                
+      407 -                          }                                   
+      408 -                        }                                     
+      409 -                      } else {                                
+      410 -                        ScaffoldMessenger.of(context).showSnac
+          -kBar(                                                         
+      411 -                          SnackBar(                           
+      412 -                            content: Text(                    
+      413 -                              'Invalid OTP',                  
+      414 -                              style: TextStyle(               
+      415 -                                color: FlutterFlowTheme.of(con
+          -text)                                                         
+      416 -                                    .primaryBackground,       
+      417 -                              ),                              
+      418 -                            ),                                
+      419 -                            duration: Duration(milliseconds: 4
+          -000),                                                         
+      420 -                            backgroundColor:                  
+      421 -                                FlutterFlowTheme.of(context).s
+          -econdary,                                                     
+      422 -                          ),                                  
+      423 -                        );                                    
+      424 -                        safeSetState(() {                     
+      425 -                          _model.pinCodeController?.clear();  
+      426 -                        });                                   
+      427 -                      }                                       
+      428 -                                                              
+      429 -                      safeSetState(() {});                    
+      311 +                    onCompleted: (pin) async {                
+      312 +                      await _verifyOtp(pin);                  
+      313                      },
+      314                      autovalidateMode: AutovalidateMode.onUserI
+           nteraction,
+      315                      validator:
+
+● Now let's build the APK to verify everything compiles:
+
+● Bash(cd "C:\Users\johna\Downloads\streetpay\streetpay" && flutter build apk
+      --release --no-tree-shake-icons 2>&1 | tail -40)
+  ⎿  Running Gradle task 'assembleRelease'...                          192.
+     5s
+     √ Built build\app\outputs\flutter-apk\app-release.apk (108.8MB)
+  ⎿  (timeout 5m)
+
+● Build succeeded. Now install it on the phone:
+
+● Bash(adb devices)
+  ⎿  Error: Exit code 127
+     /usr/bin/bash: line 1: adb: command not found
+
+● PowerShell(adb devices)
+  ⎿  Error: Exit code 1
+     adb : The term 'adb' is not recognized as the name of a cmdlet, function, 
+     script file, or operable program. Check the spelling of the 
+     name, or if a path was included, verify that the path is correct and try 
+     again.
+     At line:1 char:1
+     + adb devices
+     + ~~~
+         + CategoryInfo          : ObjectNotFound: (adb:String) [], 
+     CommandNotFoundException
+         + FullyQualifiedErrorId : CommandNotFoundException
+
+● PowerShell(& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices)
+  ⎿  List of devices attached
+     1026125347001529   offline
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb reconnect offline; Start-Sleep -Seconds 3; & $adb devices)
+  ⎿  List of devices attached
+     1026125347001529   device
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build\
+            app\outputs\flutter-apk\app…)
+  ⎿  Performing Streamed Install
+     Success
+  ⎿  (timeout 2m)
+
+● APK installed successfully. Here's what was implemented:
+
+  OTP Auto-Capture — when an SMS arrives containing a 6-digit code, it's
+  automatically filled in and submitted without the user having to type it.
+
+  Changes made:
+  - AndroidManifest.xml — added RECEIVE_SMS and READ_SMS permissions so the
+  telephony package can intercept incoming SMS
+  - phone_verification_widget.dart — added _startSmsListener() that uses the
+  already-installed telephony package to watch for incoming SMS, extracts the
+  6-digit OTP via regex \b(\d{6})\b, sets _otpCode, and calls _verifyOtp()
+  automatically
+  - phonere_verification_widget.dart — same SMS listener, plus refactored the
+  inline onCompleted callback into a reusable _verifyOtp(String otp) method so
+  both the keypad completion and the SMS listener share the same verification
+  logic
+
+  Both screens guard against double-submission with _isVerifying flags. The SMS
+  listener runs foreground-only (listenInBackground: false), so it only fires
+  when the app is open — which is exactly when the user is waiting to type the
+  OTP.
+
+✻ Baked for 9m 36s
+
+❯ i used reset password and the otp is not auto filling                         
+
+● Let me find the reset password OTP screen.
+
+● Explore(Find reset password OTP screen)
+  ⎿  Done (21 tool uses · 53.0k tokens · 43s)
+  (ctrl+o to expand)
+
+● The reset password OTP is in resetpassword_widget.dart. Let me read the
+  relevant OTP section.
+
+  Read 1 file (ctrl+o to expand)
+
+● I need to see how the OTP step is controlled by state variables:
+
+  Searched for 3 patterns, read 1 file (ctrl+o to expand)
+
+● I found the flag — _model.optuse = true switches to OTP mode. Let me check the
+   model for the field declaration:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Now I have everything. I'll add the telephony SMS listener to the reset
+  password widget, extract the onCompleted logic to a method, and guard with the
+   _model.optuse flag:
+
+● Update(lib\pages\account\resetpassword\resetpassword_widget.dart)
+  ⎿  Added 1 line
+      11  import 'package:flutter/scheduler.dart';
+      12  import 'package:google_fonts/google_fonts.dart';
+      13  import 'package:provider/provider.dart';
+      14 +import 'package:telephony/telephony.dart';                     
+      15  import 'resetpassword_model.dart';
+      16  export 'resetpassword_model.dart';
+      17  
+
+● Update(lib\pages\account\resetpassword\resetpassword_widget.dart)
+  ⎿  Added 62 lines, removed 1 line
+      27  
+      28  class _ResetpasswordWidgetState extends State<ResetpasswordWidg
+          et> {
+      29    late ResetpasswordModel _model;
+      30 -                                                               
+      30    final scaffoldKey = GlobalKey<ScaffoldState>();
+      31 +  final Telephony _telephony = Telephony.instance;             
+      32 +  bool _isOtpVerifying = false;                                
+      33  
+      34    @override
+      35    void initState() {
+     ...
+      67      _model.textController5 ??= TextEditingController();
+      68      _model.textFieldFocusNode4 ??= FocusNode();
+      69      _model.textController5!.addListener(() => safeSetState(() {
+          }));
+      70 +                                                               
+      71 +    _startSmsListener();                                       
+      72    }
+      73  
+      74    @override
+     ...
+       77      super.dispose();
+       78    }
+       79  
+       80 +  void _startSmsListener() {                                  
+       81 +    _telephony.listenIncomingSms(                             
+       82 +      onNewMessage: (SmsMessage message) {                    
+       83 +        if (!mounted || _isOtpVerifying || !_model.optuse) ret
+          +urn;                                                          
+       84 +        final body = message.body ?? '';                      
+       85 +        final match = RegExp(r'\b(\d{6})\b').firstMatch(body);
+       86 +        if (match != null) {                                  
+       87 +          final otp = match.group(1)!;                        
+       88 +          safeSetState(() {                                   
+       89 +            _model.pinCodeController?.text = otp;             
+       90 +          });                                                 
+       91 +          _verifyResetOtp(otp);                               
+       92 +        }                                                     
+       93 +      },                                                      
+       94 +      listenInBackground: false,                              
+       95 +    );                                                        
+       96 +  }                                                           
+       97 +                                                              
+       98 +  Future<void> _verifyResetOtp(String otp) async {            
+       99 +    if (_isOtpVerifying) return;                              
+      100 +    setState(() => _isOtpVerifying = true);                   
+      101 +    try {                                                     
+      102 +      _model.verifyotp = await ReverifyotpCall.call(          
+      103 +        phone: functions.removecode(_model.phonenoTextControll
+          +er.text),                                                     
+      104 +        accessToken: StreetauthCall.streettoken(              
+      105 +          (_model.strretauth?.jsonBody ?? ''),                
+      106 +        ),                                                    
+      107 +        otp: otp,                                             
+      108 +      );                                                      
+      109 +                                                              
+      110 +      if (!mounted) return;                                   
+      111 +                                                              
+      112 +      if (ReverifyotpCall.status((_model.verifyotp?.jsonBody ?
+          +? '')) == true) {                                             
+      113 +        ScaffoldMessenger.of(context).showSnackBar(           
+      114 +          const SnackBar(                                     
+      115 +            content: Text('OTP verified successfully.'),      
+      116 +            backgroundColor: Color(0xFF56B84B),               
+      117 +          ),                                                  
+      118 +        );                                                    
+      119 +        await _model.columnController?.animateTo(             
+      120 +          _model.columnController!.position.maxScrollExtent,  
+      121 +          duration: const Duration(milliseconds: 300),        
+      122 +          curve: Curves.easeOut,                              
+      123 +        );                                                    
+      124 +      } else {                                                
+      125 +        ScaffoldMessenger.of(context).showSnackBar(           
+      126 +          const SnackBar(                                     
+      127 +            content: Text('Invalid OTP. Please try again.'),  
+      128 +            backgroundColor: Color(0xFFB53434),               
+      129 +          ),                                                  
+      130 +        );                                                    
+      131 +      }                                                       
+      132 +      safeSetState(() {});                                    
+      133 +    } finally {                                               
+      134 +      if (mounted) setState(() => _isOtpVerifying = false);   
+      135 +    }                                                         
+      136 +  }                                                           
+      137 +                                                              
+      138    // ── Shared input decoration ──────────────────────────────
+           ────────────────
+      139  
+      140    InputDecoration _inputDeco({
+
+● Now replace the inline onCompleted with a call to the extracted method:
+
+● Update(lib\pages\account\resetpassword\resetpassword_widget.dart)
+  ⎿  Added 2 lines, removed 35 lines
+      776                              ),
+      777                              controller: _model.pinCodeControll
+           er,
+      778                              onChanged: (_) {},
+      779 -                            onCompleted: (_) async {          
+      780 -                              _model.verifyotp = await Reverif
+          -yotpCall.call(                                                
+      781 -                                phone: functions.removecode(  
+      782 -                                    _model.phonenoTextControll
+          -er.text),                                                     
+      783 -                                accessToken: StreetauthCall.st
+          -reettoken(                                                    
+      784 -                                  (_model.strretauth?.jsonBody
+          - ?? ''),                                                      
+      785 -                                ),                            
+      786 -                                otp: _model.pinCodeController!
+          -.text,                                                        
+      787 -                              );                              
+      788 -                                                              
+      789 -                              if (ReverifyotpCall.status(     
+      790 -                                    (_model.verifyotp?.jsonBod
+          -y ?? ''),                                                     
+      791 -                                  ) ==                        
+      792 -                                  true) {                     
+      793 -                                ScaffoldMessenger.of(context).
+          -showSnackBar(                                                 
+      794 -                                  const SnackBar(             
+      795 -                                    content: Text('OTP verifie
+          -d successfully.'),                                            
+      796 -                                    backgroundColor: Color(0xF
+          -F56B84B),                                                     
+      797 -                                  ),                          
+      798 -                                );                            
+      799 -                                await _model.columnController?
+          -.animateTo(                                                   
+      800 -                                  _model.columnController!.pos
+          -ition                                                         
+      801 -                                      .maxScrollExtent,       
+      802 -                                  duration: const Duration(mil
+          -liseconds: 300),                                              
+      803 -                                  curve: Curves.easeOut,      
+      804 -                                );                            
+      805 -                              } else {                        
+      806 -                                ScaffoldMessenger.of(context).
+          -showSnackBar(                                                 
+      807 -                                  const SnackBar(             
+      808 -                                    content: Text('Invalid OTP
+          -. Please try again.'),                                        
+      809 -                                    backgroundColor: Color(0xF
+          -FB53434),                                                     
+      810 -                                  ),                          
+      811 -                                );                            
+      812 -                              }                               
+      813 -                              safeSetState(() {});            
+      779 +                            onCompleted: (pin) async {        
+      780 +                              await _verifyResetOtp(pin);     
+      781                              },
+      782                              autovalidateMode:
+      783                                  AutovalidateMode.onUserInterac
+           tion,
+
+● Now build and install:
+
+● Bash(cd "C:\Users\johna\Downloads\streetpay\streetpay" && flutter build apk
+      --release --no-tree-shake-icons 2>&1 | tail -20)
+  ⎿  Running Gradle task 'assembleRelease'...                          189.
+     5s
+     √ Built build\app\outputs\flutter-apk\app-release.apk (108.8MB)
+  ⎿  (timeout 5m)
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb reconnect offline; Start-Sleep -Seconds 2; & $adb install -r
+            "C:\Users\johna\Downloads\str…)
+  ⎿  Error: Exit code 1
+     adb.exe: no devices/emulators found
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb devices)
+  ⎿  List of devices attached
+
+● Phone isn't connected. Please plug in your phone and enable USB debugging,
+  then type ! adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build
+  \app\outputs\flutter-apk\app-release.apk" (or just reconnect and I'll install
+  it).
+
+  The APK is already built. Here's what was added to resetpassword_widget.dart:
+
+  - SMS listener starts in initState — when an SMS arrives containing a 6-digit
+  code AND the user is in OTP mode (_model.optuse == true), it auto-fills the
+  PIN field and calls verification
+  - _verifyResetOtp(String otp) — the verification logic extracted from the
+  inline onCompleted callback, now shared between manual entry and SMS
+  auto-capture
+  - _isOtpVerifying flag — prevents double-submission if both the keypad
+  onCompleted and the SMS listener fire simultaneously
+
+✻ Cooked for 6m 43s
+
+❯ connect my phone                                                              
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb devices)  ⎿  List of devices attached
+     1026125347001529   device
+
+● Phone is connected. Installing now:
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build\
+            app\outputs\flutter-apk\app…)
+  ⎿  Performing Streamed Install
+     Success
+  ⎿  (timeout 2m)
+
+● Installed. Test the reset password OTP flow — when the SMS arrives the 6-digit
+   code should auto-fill and verify without you having to type it.
+
+✻ Sautéed for 44s
+
+※ recap: Added OTP auto-capture to registration, re-verification, and reset password screens so incoming SMS codes fill and submit automatically. APK is installed and ready to test. (disable recaps in /config)
+
+❯ the tts is suppose to be disabled by diffault until user activate it          
+
+● Let me find the TTS implementation in the project.
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+● Let me check where TTS is toggled in the UI and how it's currently set:
+
+  Searched for 2 patterns (ctrl+o to expand)
+
+● Let me read the profile toggle section to understand what the switch label
+  says:
+
+  Read 1 file (ctrl+o to expand)
+
+● Let me check how TTS is called in the home widget and whether any calls bypass
+   the check:
+
+  Searched for 2 patterns, read 2 files (ctrl+o to expand)
+
+● The code flow is correct — speak() always checks disableVoiceBalance first.
+  The problem is the toggle UX is inverted. The switch says "Disable Voice
+  Announcements" and starts ON by default, which is confusing. A new user sees
+  an ON switch and assumes voice is active, but the name says "disable." It
+  should be "Voice Announcements" toggle that starts OFF — user flips it ON to
+  activate TTS.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(lib\pages\profile\profile\profile_widget.dart)
+  ⎿  Added 6 lines, removed 4 lines
+      626                                    crossAxisAlignment: CrossAxi
+           sAlignment.start,
+      627                                    children: [
+      628                                      Text(
+      629 -                                      'Disable Voice Announcem
+          -ents',                                                        
+      629 +                                      'Voice Announcements',  
+      630                                        style: GoogleFonts.plusJ
+           akartaSans(
+      631                                          color: const Color(0xF
+           F101614),
+      632                                          fontSize: 14,
+     ...
+      634                                        ),
+      635                                      ),
+      636                                      Text(
+      637 -                                      'Mute all voice announce
+          -ments in the app',                                            
+      637 +                                      FFAppState().disableVoic
+          +eBalance                                                      
+      638 +                                          ? 'Voice announcemen
+          +ts are off'                                                   
+      639 +                                          : 'Voice announcemen
+          +ts are on',                                                   
+      640                                        style: GoogleFonts.plusJ
+           akartaSans(
+      641                                          color: const Color(0xF
+           F6E7A72),
+      642                                          fontSize: 11.5,
+     ...
+      647                                  ),
+      648                                ),
+      649                                Switch(
+      648 -                                value: FFAppState().disableVoi
+          -ceBalance,                                                    
+      650 +                                value: !FFAppState().disableVo
+          +iceBalance,                                                   
+      651                                  onChanged: (val) {
+      652                                    setState(() {
+      651 -                                    FFAppState().disableVoiceB
+          -alance = val;                                                 
+      653 +                                    FFAppState().disableVoiceB
+          +alance = !val;                                                
+      654                                    });
+      655                                  },
+      656                                  activeColor: const Color(0xFF5
+           6B84B),
+
+● Now build and install:
+
+● Bash(cd "C:\Users\johna\Downloads\streetpay\streetpay" && flutter build apk
+      --release --no-tree-shake-icons 2>&1 | tail -10)
+  ⎿  Running Gradle task 'assembleRelease'...                          190.
+     3s
+     √ Built build\app\outputs\flutter-apk\app-release.apk (108.8MB)
+  ⎿  (timeout 5m)
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build\
+            app\outputs\flutter-apk\app…)
+  ⎿  Error: Exit code 1
+     adb.exe: device offline
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb reconnect offline; Start-Sleep -Seconds 3; & $adb devices)
+  ⎿  List of devices attached
+     1026125347001529   device
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build\
+            app\outputs\flutter-apk\app…)
+  ⎿  Performing Streamed Install
+     Success
+  ⎿  (timeout 2m)
+
+● Installed. What changed:
+
+  - Switch is now OFF by default — disableVoiceBalance = true means voice is
+  off, so the toggle (!disableVoiceBalance) starts at false (OFF). The user must
+   explicitly flip it ON to hear voice.
+  - Label changed from "Disable Voice Announcements" to "Voice Announcements" —
+  no more double-negative confusion.
+  - Subtitle is dynamic — shows "Voice announcements are off" or "Voice
+  announcements are on" so the state is always unambiguous.
+  - The underlying disableVoiceBalance flag and all TTS checks remain unchanged
+  — only the UI presentation flipped.
+
+✻ Brewed for 5m 44s
+
+❯ So I just did something now I notice that I did not have all the details      
+  required for proof of address generation today that 43 and I notice that he's 
+   not bringing out the form so by default it's just using the default values   
+  that we put which is absolutely alright So I want us to look deep into        
+  especially the three upgrade and the proof of address generation Also for the 
+   design I think there is a bit of congestion between the generate proof of    
+  address and the text and the button so maybe we should just make it the       
+  button should stand on a separate arrow instead of making it on the on the    
+  same problem you should just be down below the entire and the entire the      
+  entire design so that will not just be wasting I will not just be jam packing 
+   everything together                                                          
+
+● Let me read the Tier 3 upgrade widget and the proof of address section to
+  understand the current layout.
+
+  Read 1 file (ctrl+o to expand)
+● Now I have a full picture. Two problems to fix:
+
+  1. Generation gate: _addressFilled blocks the button when address fields are
+  empty — but the modal has defaults so it should always be tappable
+  2. Layout congestion: Icon + long text "Auto-Generate Address Verification
+  Certificate" all crammed into one row. Button needs to sit below the
+  explanation text, full-width, on its own line
+
+  Let me redesign the proof of address section:
+
+● Update(lib\pages\profile\upgradetotier3\upgradetotier3_widget.dart)
+  ⎿  Added 88 lines, removed 97 lines
+      745                  ),
+      746                  const SizedBox(height: 10.0),
+      747  
+      748 -                // Auto-generate button                       
+      749 -                Opacity(                                      
+      750 -                  opacity: _addressFilled ? 1.0 : 0.45,       
+      751 -                  child: InkWell(                             
+      752 -                    splashColor: Colors.transparent,          
+      753 -                    focusColor: Colors.transparent,           
+      754 -                    hoverColor: Colors.transparent,           
+      755 -                    highlightColor: Colors.transparent,       
+      756 -                    onTap: _addressFilled                     
+      757 -                        ? () async {                          
+      748 +                // Auto-generate card                         
+      749 +                Container(                                    
+      750 +                  decoration: BoxDecoration(                  
+      751 +                    color: const Color(0xFFE8F5E9),           
+      752 +                    borderRadius: BorderRadius.circular(12.0),
+      753 +                    border: Border.all(                       
+      754 +                      color: const Color(0xFF81C784),         
+      755 +                      width: 1.0,                             
+      756 +                    ),                                        
+      757 +                  ),                                          
+      758 +                  padding: const EdgeInsets.all(16.0),        
+      759 +                  child: Column(                              
+      760 +                    crossAxisAlignment: CrossAxisAlignment.str
+          +etch,                                                         
+      761 +                    children: [                               
+      762 +                      // Header                               
+      763 +                      Row(                                    
+      764 +                        children: [                           
+      765 +                          const Icon(                         
+      766 +                            Icons.auto_awesome_rounded,       
+      767 +                            color: Color(0xFF2E7D32),         
+      768 +                            size: 18.0,                       
+      769 +                          ),                                  
+      770 +                          const SizedBox(width: 8.0),         
+      771 +                          Text(                               
+      772 +                            'Auto-Generate Certificate',      
+      773 +                            style: GoogleFonts.inter(         
+      774 +                              fontSize: 14.0,                 
+      775 +                              fontWeight: FontWeight.w700,    
+      776 +                              color: const Color(0xFF2E7D32), 
+      777 +                            ),                                
+      778 +                          ),                                  
+      779 +                        ],                                    
+      780 +                      ),                                      
+      781 +                      const SizedBox(height: 8.0),            
+      782 +                      // Description                          
+      783 +                      Text(                                   
+      784 +                        'We\'ll create a Visit Feedback Addres
+          +s Verification Certificate using your details. You can preview
+          + and edit it before attaching.',                              
+      785 +                        style: GoogleFonts.inter(             
+      786 +                          fontSize: 12.0,                     
+      787 +                          fontWeight: FontWeight.w500,        
+      788 +                          color: const Color(0xFF4A7A54),     
+      789 +                        ),                                    
+      790 +                      ),                                      
+      791 +                      if (!_addressFilled) ...[               
+      792 +                        const SizedBox(height: 6.0),          
+      793 +                        Text(                                 
+      794 +                          'Tip: Fill in your address fields ab
+          +ove for a more accurate certificate.',                        
+      795 +                          style: GoogleFonts.inter(           
+      796 +                            fontSize: 11.5,                   
+      797 +                            fontWeight: FontWeight.w500,      
+      798 +                            color: const Color(0xFF8B6914),   
+      799 +                          ),                                  
+      800 +                        ),                                    
+      801 +                      ],                                      
+      802 +                      const SizedBox(height: 14.0),           
+      803 +                      // Button — full width, own row         
+      804 +                      SizedBox(                               
+      805 +                        width: double.infinity,               
+      806 +                        child: ElevatedButton.icon(           
+      807 +                          onPressed: () async {               
+      808                              await showModalBottomSheet(
+      809                                isScrollControlled: true,
+      810                                backgroundColor: Colors.transpar
+           ent,
+      811                                context: context,
+      812                                builder: (context) {
+      813                                  return Padding(
+      764 -                                  padding:                    
+      765 -                                      MediaQuery.viewInsetsOf(
+          -context),                                                     
+      814 +                                  padding: MediaQuery.viewInse
+          +tsOf(context),                                                
+      815                                    child: VisitFeedbackModalWid
+           get(
+      767 -                                    customerName: FFAppState()
+      768 -                                            .accountname      
+      769 -                                            .isNotEmpty       
+      816 +                                    customerName: FFAppState()
+          +.accountname.isNotEmpty                                       
+      817                                          ? FFAppState().account
+           name
+      818                                          : null,
+      772 -                                    verificationAddress:      
+      773 -                                        _buildAddressString(),
+      819 +                                    verificationAddress: _buil
+          +dAddressString(),                                             
+      820                                      residentialDescription: _m
+           odel
+      775 -                                            .textController7! 
+      776 -                                            .text             
+      777 -                                            .trim()           
+      778 -                                            .isNotEmpty       
+      779 -                                        ? _model.textControlle
+          -r7!.text                                                      
+      780 -                                            .trim()           
+      821 +                                            .textController7!.
+          +text.trim().isNotEmpty                                        
+      822 +                                        ? _model.textControlle
+          +r7!.text.trim()                                               
+      823                                          : null,
+      824                                      dateOfVisit: DateTime.now(
+           ),
+      783 -                                    customerSignatureBase64:  
+      784 -                                        FFAppState().signature
+          -.isNotEmpty                                                   
+      785 -                                            ? FFAppState().sig
+          -nature                                                        
+      786 -                                            : null,           
+      825 +                                    customerSignatureBase64: F
+          +FAppState().signature.isNotEmpty                              
+      826 +                                        ? FFAppState().signatu
+          +re                                                            
+      827 +                                        : null,               
+      828                                      onGenerated: (file) {
+      829                                        safeSetState(() {
+      789 -                                        _model.uploadedLocalFi
+          -le_uploadData63 =                                             
+      790 -                                            file;             
+      830 +                                        _model.uploadedLocalFi
+          +le_uploadData63 = file;                                       
+      831                                        });
+      792 -                                      ScaffoldMessenger.of(con
+          -text)                                                         
+      793 -                                          .showSnackBar(      
+      832 +                                      ScaffoldMessenger.of(con
+          +text).showSnackBar(                                           
+      833                                          const SnackBar(
+      834                                            content: Text(
+      835                                                'Address Verific
+           ation Certificate attached as Proof of Residence!'),
+      797 -                                          backgroundColor:    
+      798 -                                              Color(0xFF00A651
+          -),                                                            
+      836 +                                          backgroundColor: Col
+          +or(0xFF00A651),                                               
+      837                                          ),
+      838                                        );
+      839                                      },
+     ...
+      841                                  );
+      842                                },
+      843                              );
+      806 -                          }                                   
+      807 -                        : null,                               
+      808 -                    child: Container(                         
+      809 -                      width: double.infinity,                 
+      810 -                      padding: const EdgeInsetsDirectional.fro
+          -mSTEB(                                                        
+      811 -                          12.0, 14.0, 12.0, 14.0),            
+      812 -                      decoration: BoxDecoration(              
+      813 -                        color: _addressFilled                 
+      814 -                            ? const Color(0xFFE8F5E9)         
+      815 -                            : FlutterFlowTheme.of(context)    
+      816 -                                .secondaryBackground,         
+      817 -                        borderRadius: BorderRadius.circular(10
+          -.0),                                                          
+      818 -                        border: Border.all(                   
+      819 -                          color: _addressFilled               
+      820 -                              ? const Color(0xFF00A651)       
+      821 -                              : FlutterFlowTheme.of(context).a
+          -lternate,                                                     
+      822 -                          width: 1.5,                         
+      844 +                          },                                  
+      845 +                          icon: const Icon(Icons.description_o
+          +utlined, size: 18.0),                                         
+      846 +                          label: const Text('Generate Proof of
+          + Address'),                                                   
+      847 +                          style: ElevatedButton.styleFrom(    
+      848 +                            backgroundColor: const Color(0xFF0
+          +0A651),                                                       
+      849 +                            foregroundColor: Colors.white,    
+      850 +                            padding: const EdgeInsets.symmetri
+          +c(vertical: 14.0),                                            
+      851 +                            textStyle: GoogleFonts.inter(     
+      852 +                              fontSize: 14.0,                 
+      853 +                              fontWeight: FontWeight.w700,    
+      854 +                            ),                                
+      855 +                            shape: RoundedRectangleBorder(    
+      856 +                              borderRadius: BorderRadius.circu
+          +lar(10.0),                                                    
+      857 +                            ),                                
+      858 +                            elevation: 0,                     
+      859 +                          ),                                  
+      860                          ),
+      861                        ),
+      825 -                      child: Row(                             
+      826 -                        mainAxisAlignment: MainAxisAlignment.c
+          -enter,                                                        
+      827 -                        children: [                           
+      828 -                          Icon(                               
+      829 -                            Icons.auto_awesome_rounded,       
+      830 -                            color: _addressFilled             
+      831 -                                ? const Color(0xFF00A651)     
+      832 -                                : FlutterFlowTheme.of(context)
+      833 -                                    .secondaryText,           
+      834 -                            size: 18.0,                       
+      835 -                          ),                                  
+      836 -                          const SizedBox(width: 8.0),         
+      837 -                          Text(                               
+      838 -                            'Auto-Generate Address Verificatio
+          -n Certificate',                                               
+      839 -                            style: FlutterFlowTheme.of(context
+          -)                                                             
+      840 -                                .bodyMedium                   
+      841 -                                .override(                    
+      842 -                                  font: GoogleFonts.inter(    
+      843 -                                      fontWeight: FontWeight.b
+          -old),                                                         
+      844 -                                  color: _addressFilled       
+      845 -                                      ? const Color(0xFF00A651
+          -)                                                             
+      846 -                                      : FlutterFlowTheme.of(co
+          -ntext)                                                        
+      847 -                                          .secondaryText,     
+      848 -                                  fontSize: 12.0,             
+      849 -                                  letterSpacing: 0.0,         
+      850 -                                ),                            
+      851 -                          ),                                  
+      852 -                        ],                                    
+      853 -                      ),                                      
+      854 -                    ),                                        
+      862 +                    ],                                        
+      863                    ),
+      864                  ),
+      857 -                if (!_addressFilled)                          
+      858 -                  Padding(                                    
+      859 -                    padding: const EdgeInsets.only(top: 6.0), 
+      860 -                    child: Text(                              
+      861 -                      'Fill in Street Address, City, and State
+          - above to enable',                                            
+      862 -                      style: FlutterFlowTheme.of(context)     
+      863 -                          .bodySmall                          
+      864 -                          .override(                          
+      865 -                            font: GoogleFonts.inter(),        
+      866 -                            color: FlutterFlowTheme.of(context
+          -)                                                             
+      867 -                                .secondaryText,               
+      868 -                            fontSize: 11.0,                   
+      869 -                            letterSpacing: 0.0,               
+      870 -                          ),                                  
+      871 -                      textAlign: TextAlign.center,            
+      872 -                    ),                                        
+      873 -                  ),                                          
+      865                  const SizedBox(height: 30.0),
+      866  
+      867                  // ── Submit Button ──────────────────────────
+           ────────────
+
+● Now build and install:
+
+● Bash(cd "C:\Users\johna\Downloads\streetpay\streetpay" && flutter build apk
+      --release --no-tree-shake-icons 2>&1 | tail -10)
+  ⎿  Running Gradle task 'assembleRelease'...                          194.
+     7s
+     √ Built build\app\outputs\flutter-apk\app-release.apk (108.8MB)
+  ⎿  (timeout 5m)
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build\
+            app\outputs\flutter-apk\app…)
+  ⎿  Error: Exit code 1
+     adb.exe: no devices/emulators found
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb reconnect offline; Start-Sleep -Seconds 3; & $adb devices)
+  ⎿  List of devices attached
+
+● Phone isn't detected. Please plug it back in and enable USB debugging, then
+  I'll install. The APK is built and ready.
+
+  Here's what changed in the Tier 3 proof of address section:
+
+  Gate removed — the "Generate Proof of Address" button is now always tappable
+  regardless of whether the address fields are filled. The modal has its own
+  defaults so it will always produce a certificate.
+
+  Layout redesigned — replaced the cramped single-row button with a green info
+  card:
+  - Header row: icon + "Auto-Generate Certificate" (short, readable title)
+  - Description paragraph explaining what will happen, below the header with
+  room to breathe
+  - Amber tip text that appears only when address fields are empty (soft hint,
+  not a blocker)
+  - "Generate Proof of Address" button on its own full-width row at the bottom —
+   completely separate from the text above, no more cramming
+
+✻ Sautéed for 6m 17s
+
+※ recap: Building the StreetPay Flutter app with payment, KYC tier upgrades, OTP auto-capture, TTS control, and proof of address generation. Phone disconnected during APK install — reconnect and run the install. (disable recaps in /config)
+
+❯ connect my phone                                                              
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb devices)
+  ⎿  List of devices attached
+     1026125347001529   device
+
+● Phone is connected. Installing now:
+
+● PowerShell($adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; &
+            $adb install -r "C:\Users\johna\Downloads\streetpay\streetpay\build\
+            app\outputs\flutter-apk\app…)
+  ⎿  Performing Streamed Install
+     Success
+  ⎿  (timeout 2m)
+
+● Installed. Test the Tier 3 upgrade screen — the "Generate Proof of Address"
+  button should now be a clean full-width green button sitting below the
+  description text, and it will open the certificate modal even if the address
+  fields are empty.
+
+✻ Worked for 19s
