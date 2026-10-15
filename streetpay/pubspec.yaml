@@ -77,7 +77,7 @@ dependencies:
   image_picker_macos: 0.2.1+2
   image_picker_platform_interface: 2.10.1
   image_picker_windows: 0.2.1+1
-  intl: 0.20.2
+  intl: ^0.20.2
   json_path: 0.7.2
   local_auth: ^2.1.5
   record: ^6.2.1
