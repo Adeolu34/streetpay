@@ -9,7 +9,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.streetsales.streetsalesApp
+        bundle_identifier: com.streetpayngr.app
       flutter: stable
       xcode: latest
       cocoapods: default
