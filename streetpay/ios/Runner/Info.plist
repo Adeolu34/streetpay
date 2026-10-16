@@ -57,6 +57,10 @@
     <string>StreetPay uses Bluetooth to pair with peripheral devices such as card readers, printers, and nearby merchant systems to process transactions securely and efficiently.</string>
     <key>NSContactsUsageDescription</key>
     <string>StreetPay needs access to your contacts so you can quickly send or request money from people you know without manually entering their phone numbers or account details.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>StreetPay requires access to your microphone to record audio for interactive voice challenges, voice notes, and customer support.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>StreetPay uses speech recognition to transcribe and evaluate your spoken responses during interactive voice challenges and voice commands.</string>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>
