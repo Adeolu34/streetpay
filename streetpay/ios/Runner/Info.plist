@@ -39,6 +39,8 @@
     <string>$(FLUTTER_BUILD_NUMBER)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>StreetPay needs access to your current location while the app is in use to help you find nearby agents, merchants, and services, and to calculate accurate delivery or service charges.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
