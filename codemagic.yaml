@@ -1,7 +1,7 @@
 workflows:
   ios-release:
     name: iOS Release to App Store
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
     max_build_duration: 60
     working_directory: streetpay
     integrations:
@@ -11,7 +11,7 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.streetpayngr.app
       flutter: 3.41.9
-      xcode: 16.0
+      xcode: latest
       cocoapods: default
     scripts:
       - name: Synchronize system clock with Apple NTP
@@ -39,3 +39,4 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
