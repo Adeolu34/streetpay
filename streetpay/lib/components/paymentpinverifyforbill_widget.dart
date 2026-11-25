@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:local_auth/local_auth.dart';
+import '/services/payment_guard_service.dart';
 import 'paymentpinverifyforbill_model.dart';
 export 'paymentpinverifyforbill_model.dart';
 
@@ -109,6 +110,40 @@ class _PaymentpinverifyforbillWidgetState
   Future<void> _submitBillPayment({bool viaFingerprint = false}) async {
     if (_isProcessing) return;
     if (!viaFingerprint && _pin.length != 5) return;
+
+    if (!PaymentGuardService.canTapButton()) return;
+
+    final cleanAccount = (widget.customeraccountno ?? '').replaceAll(RegExp(r'\s+'), '');
+    final parsedAmount = (widget.amount as num?)?.toDouble() ?? 0.0;
+
+    final remainingCooldown = PaymentGuardService.getRemainingCooldown(
+      accountNumber: cleanAccount,
+      amount: parsedAmount,
+    );
+    if (remainingCooldown > 0) {
+      PaymentGuardService.showDuplicateWarningDialog(
+        context: context,
+        recipientName: widget.customername ?? cleanAccount,
+        accountNumber: cleanAccount,
+        amount: parsedAmount,
+        remainingSeconds: remainingCooldown,
+        serviceType: 'Bill Payment',
+      );
+      return;
+    }
+
+    if (!PaymentGuardService.acquireLock()) {
+      setState(() {
+        _isProcessing = false;
+        _pin = '';
+      });
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
     try {
       await _doSubmitBillPayment(viaFingerprint: viaFingerprint).timeout(const Duration(seconds: 30));
     } on TimeoutException {
@@ -119,6 +154,11 @@ class _PaymentpinverifyforbillWidgetState
               style: TextStyle(color: Colors.white)),
           backgroundColor: Color(0xFFD9383A),
         ));
+      }
+    } finally {
+      PaymentGuardService.releaseLock();
+      if (mounted && _isProcessing) {
+        setState(() => _isProcessing = false);
       }
     }
   }
@@ -181,6 +221,10 @@ class _PaymentpinverifyforbillWidgetState
           deviceid: _model.deviceid,
           sessionid: sessionToUse,
         );
+
+        final cleanAccount = (widget.customeraccountno ?? '').replaceAll(RegExp(r'\s+'), '');
+        final parsedAmount = (widget.amount as num?)?.toDouble() ?? 0.0;
+        PaymentGuardService.recordPaymentAttempt(accountNumber: cleanAccount, amount: parsedAmount);
 
         _model.othertrans = await WalletAsAServiceGroup.otherBankTransferCall.call(
           customeraccount: widget.customeraccount,
@@ -332,15 +376,17 @@ class _PaymentpinverifyforbillWidgetState
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(28.0),
-          topRight: Radius.circular(28.0),
+    return PopScope(
+      canPop: !_isProcessing,
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(28.0),
+            topRight: Radius.circular(28.0),
+          ),
         ),
-      ),
       child: SafeArea(
         top: false,
         child: Stack(
@@ -545,6 +591,7 @@ class _PaymentpinverifyforbillWidgetState
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }

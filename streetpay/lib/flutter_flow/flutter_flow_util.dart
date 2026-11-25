@@ -325,7 +325,12 @@ T? castToType<T>(dynamic value) {
     case double:
       if (value is num) return value.toDouble() as T;
       if (value is String) {
-        final d = double.tryParse(value.trim());
+        final clean = value
+            .replaceAll('₦', '')
+            .replaceAll('N', '')
+            .replaceAll(',', '')
+            .trim();
+        final d = double.tryParse(clean);
         if (d != null) return d as T;
       }
       break;

@@ -462,6 +462,7 @@ class OtherBankTransferCall {
     String? sectionid = '',
     String? refid = '',
     String? authToken = '',
+    String? bankname = '',
   }) async {
     final baseUrl = WalletAsAServiceGroup.getBaseUrl(
       authToken: authToken,
@@ -469,21 +470,100 @@ class OtherBankTransferCall {
 
     // Normalize bank code (must be 3-6 digits; default to '120001' for StreetPay / 9PSB)
     String cleanBank = (customeraccount ?? '').trim();
-    if (cleanBank.isEmpty ||
-        cleanBank.toLowerCase().contains('streetpay') ||
-        cleanBank.toLowerCase().contains('street pay') ||
-        cleanBank == '000000' ||
-        !RegExp(r'^\d{3,6}$').hasMatch(cleanBank)) {
-      cleanBank = '120001';
+    final bName = (bankname != null && bankname.trim().isNotEmpty)
+        ? bankname.trim().toLowerCase()
+        : cleanBank.toLowerCase();
+
+    const Map<String, String> wellKnownBankCodes = {
+      'streetpay': '120001',
+      'street pay': '120001',
+      '9psb': '120001',
+      '9 payment': '120001',
+      'nine psb': '120001',
+      'opay': '100004',
+      'paycom': '100004',
+      'palmpay': '100033',
+      'moniepoint': '090405',
+      'kuda': '090267',
+      'guaranty': '058',
+      'gtbank': '058',
+      'gtb': '058',
+      'access': '044',
+      'zenith': '057',
+      'united bank': '033',
+      'uba': '033',
+      'first bank': '011',
+      'firstbank': '011',
+      'fidelity': '070',
+      'stanbic': '039',
+      'sterling': '232',
+      'fcmb': '214',
+      'first city': '214',
+      'union': '032',
+      'wema': '035',
+      'alat': '035',
+      'polaris': '076',
+      'ecobank': '050',
+      'keystone': '082',
+      'providus': '101',
+      'jaiz': '301',
+      'taj': '302',
+    };
+
+    const Map<String, String> bankCodeRemap = {
+      '999992': '100004', // OPay
+      '999991': '100033', // PalmPay
+      '50515': '090405',  // Moniepoint
+      '50211': '090267',  // Kuda
+    };
+
+    if (RegExp(r'^\d{3,6}$').hasMatch(cleanBank) && cleanBank != '000000') {
+      cleanBank = bankCodeRemap[cleanBank] ?? cleanBank;
+      // If code was mistakenly default 120001, but bank name indicates a commercial bank, resolve from name
+      if (cleanBank == '120001' && bName.isNotEmpty &&
+          !bName.contains('street') && !bName.contains('9psb')) {
+        for (final entry in wellKnownBankCodes.entries) {
+          if (bName.contains(entry.key)) {
+            cleanBank = entry.value;
+            break;
+          }
+        }
+      }
+    } else {
+      // cleanBank is not numeric (caller passed bank name in customeraccount)
+      bool matched = false;
+      for (final entry in wellKnownBankCodes.entries) {
+        if (bName.contains(entry.key)) {
+          cleanBank = entry.value;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        cleanBank = '120001';
+      }
     }
 
-    // Normalize account number: extract digits only, strip leading 0 if 11 digits
+    // Normalize account number: extract digits only, strip leading 0 if 11 digits, strip 234 if 13 digits
     String cleanAccountNo = (customeraccountno ?? '').replaceAll(RegExp(r'\D'), '');
+    if (cleanAccountNo.length == 13 && cleanAccountNo.startsWith('234')) {
+      cleanAccountNo = cleanAccountNo.substring(3);
+    }
     if (cleanAccountNo.length == 11 && cleanAccountNo.startsWith('0')) {
       cleanAccountNo = cleanAccountNo.substring(1);
     }
     if (cleanAccountNo.isEmpty) {
       cleanAccountNo = (customeraccountno ?? '').trim();
+    }
+
+    // Safe narration & description length for NIBSS switches
+    String safeNarration = (narration ?? '').trim();
+    if (safeNarration.length > 30) {
+      safeNarration = safeNarration.substring(0, 30);
+    }
+    String safeDesc = (description ?? '').trim();
+    if (safeDesc.length > 30) {
+      safeDesc = safeDesc.substring(0, 30);
     }
 
     final ffApiRequestBody = '''
@@ -497,12 +577,12 @@ class OtherBankTransferCall {
       "sendername": "${_esc(sendername)}"
     }
   },
-  "narration": "${_esc(narration)}",
+  "narration": "${_esc(safeNarration.isNotEmpty ? safeNarration : (customername ?? 'Transfer'))}",
   "order": {
     "amount": "${_esc(amount)}",
     "country": "NGA",
     "currency": "NGN",
-    "description": "${_esc(description)}"
+    "description": "${_esc(safeDesc.isNotEmpty ? safeDesc : '-')}"
   },
   "transaction": {
     "reference": "${_esc(refrence)}",
@@ -534,18 +614,41 @@ class OtherBankTransferCall {
     );
   }
 
-  String? message(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.message''',
-      ));
+  String? message(dynamic response) {
+    if (response == null) return null;
+    final msg = getJsonField(response, r'''$.message''') ??
+        getJsonField(response, r'''$.data.message''') ??
+        getJsonField(response, r'''$.Message''');
+    if (msg != null && msg.toString().trim().isNotEmpty) {
+      return msg.toString().trim();
+    }
+    return null;
+  }
+
   dynamic fulldata(dynamic response) => getJsonField(
         response,
         r'''$''',
       );
-  bool? success(dynamic response) => castToType<bool>(getJsonField(
-        response,
-        r'''$.success''',
-      ));
+
+  bool? success(dynamic response) {
+    if (response == null) return false;
+    final succ = getJsonField(response, r'''$.success''');
+    if (succ == true || succ == 'true') return true;
+    final status = getJsonField(response, r'''$.status''')?.toString().toLowerCase();
+    if (status == 'success' || status == 'successful' || status == '90000' || status == '00') {
+      return true;
+    }
+    final msg = (getJsonField(response, r'''$.message''') ??
+            getJsonField(response, r'''$.data.message''') ??
+            getJsonField(response, r'''$.Message'''))
+        ?.toString()
+        .toLowerCase() ??
+        '';
+    if (msg.contains('success') || msg.contains('approved') || msg.contains('completed')) {
+      return true;
+    }
+    return false;
+  }
 }
 
 class DebitwalletCall {
@@ -5510,11 +5613,89 @@ class IspincodevalidCall {
         response,
         r'''$.Profile.HasSecurityAnswers''',
       ));
-  static String? accountbalanace(dynamic response) =>
-      castToType<String>(getJsonField(
-        response,
-        r'''$.CoreB''',
-      ));
+  static String? accountbalanace(dynamic response) {
+    final raw = getJsonField(response, r'''$.CoreB''');
+    if (raw == null) return null;
+
+    if (raw is num) {
+      return raw.toString();
+    }
+
+    dynamic candidate = raw;
+    if (raw is String) {
+      final trimmed = raw.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+          (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          candidate = jsonDecode(trimmed);
+        } catch (_) {
+          return null;
+        }
+      } else {
+        final clean = trimmed
+            .replaceAll('₦', '')
+            .replaceAll('N', '')
+            .replaceAll(',', '')
+            .trim();
+        final numVal = double.tryParse(clean);
+        if (numVal != null && !numVal.isNaN && !numVal.isInfinite) {
+          return numVal.toString();
+        }
+        return null;
+      }
+    }
+
+    if (candidate is Map) {
+      // If the map indicates failure or error, this is an error payload, not a balance
+      if (candidate['success'] == false ||
+          candidate['status'] == false ||
+          candidate['IsValid'] == false ||
+          candidate.containsKey('error') ||
+          candidate.containsKey('Error')) {
+        return null;
+      }
+      final possibleKeys = [
+        'availableBalance',
+        'AvailableBalance',
+        'balance',
+        'Balance',
+        'avalbal',
+        'amount',
+      ];
+      for (final key in possibleKeys) {
+        final val = candidate[key];
+        if (val is num) return val.toString();
+        if (val is String) {
+          final clean = val
+              .replaceAll('₦', '')
+              .replaceAll('N', '')
+              .replaceAll(',', '')
+              .trim();
+          final numVal = double.tryParse(clean);
+          if (numVal != null) return numVal.toString();
+        }
+      }
+      if (candidate['data'] is Map) {
+        final dataMap = candidate['data'] as Map;
+        for (final key in possibleKeys) {
+          final val = dataMap[key];
+          if (val is num) return val.toString();
+          if (val is String) {
+            final clean = val
+                .replaceAll('₦', '')
+                .replaceAll('N', '')
+                .replaceAll(',', '')
+                .trim();
+            final numVal = double.tryParse(clean);
+            if (numVal != null) return numVal.toString();
+          }
+        }
+      }
+      return null;
+    }
+
+    return null;
+  }
   static String? walletid(dynamic response) => castToType<String>(getJsonField(
         response,
         r'''$.Profile.WalletID''',
@@ -6112,6 +6293,21 @@ class GrantaccessCall {
     String? guestno = '',
     String? accessToken = '',
   }) async {
+    String validToken = (accessToken != null && accessToken.isNotEmpty)
+        ? accessToken
+        : (FFAppState().bsptoken.isNotEmpty
+            ? FFAppState().bsptoken
+            : FFAppState().streetauth);
+    if (validToken.isEmpty) {
+      final auth = await StreetauthCall.call(forceRefresh: true);
+      final fresh = StreetauthCall.streettoken(auth.jsonBody);
+      if (fresh != null && fresh.isNotEmpty) {
+        validToken = fresh;
+        FFAppState().bsptoken = fresh;
+        FFAppState().streetauth = fresh;
+      }
+    }
+
     final ffApiRequestBody = '''
 {
   "theKey": "913",
@@ -6123,7 +6319,7 @@ class GrantaccessCall {
       apiUrl: 'https://api.mypingapi.com/sp/myhandler',
       callType: ApiCallType.POST,
       headers: {
-        'Authorization': 'Bearer ${accessToken}',
+        'Authorization': 'Bearer ${validToken}',
       },
       params: {},
       body: ffApiRequestBody,
@@ -6152,6 +6348,21 @@ class ListguestprofileCall {
     String? hostphone = '',
     String? accessToken = '',
   }) async {
+    String validToken = (accessToken != null && accessToken.isNotEmpty)
+        ? accessToken
+        : (FFAppState().bsptoken.isNotEmpty
+            ? FFAppState().bsptoken
+            : FFAppState().streetauth);
+    if (validToken.isEmpty) {
+      final auth = await StreetauthCall.call(forceRefresh: true);
+      final fresh = StreetauthCall.streettoken(auth.jsonBody);
+      if (fresh != null && fresh.isNotEmpty) {
+        validToken = fresh;
+        FFAppState().bsptoken = fresh;
+        FFAppState().streetauth = fresh;
+      }
+    }
+
     final ffApiRequestBody = '''
 {
   "theKey": "916",
@@ -6162,7 +6373,7 @@ class ListguestprofileCall {
       apiUrl: 'https://api.mypingapi.com/sp/myhandler',
       callType: ApiCallType.POST,
       headers: {
-        'Authorization': 'Bearer ${accessToken}',
+        'Authorization': 'Bearer ${validToken}',
       },
       params: {},
       body: ffApiRequestBody,
@@ -6192,6 +6403,21 @@ class ListhostprofileCall {
     String? guestphone = '',
     String? accessToken = '',
   }) async {
+    String validToken = (accessToken != null && accessToken.isNotEmpty)
+        ? accessToken
+        : (FFAppState().bsptoken.isNotEmpty
+            ? FFAppState().bsptoken
+            : FFAppState().streetauth);
+    if (validToken.isEmpty) {
+      final auth = await StreetauthCall.call(forceRefresh: true);
+      final fresh = StreetauthCall.streettoken(auth.jsonBody);
+      if (fresh != null && fresh.isNotEmpty) {
+        validToken = fresh;
+        FFAppState().bsptoken = fresh;
+        FFAppState().streetauth = fresh;
+      }
+    }
+
     final ffApiRequestBody = '''
 {
   "theKey": "915",
@@ -6202,7 +6428,7 @@ class ListhostprofileCall {
       apiUrl: 'https://api.mypingapi.com/sp/myhandler',
       callType: ApiCallType.POST,
       headers: {
-        'Authorization': 'Bearer ${accessToken}',
+        'Authorization': 'Bearer ${validToken}',
       },
       params: {},
       body: ffApiRequestBody,
@@ -6488,6 +6714,21 @@ class RevokeguestCall {
     String? guestphone = '',
     String? accessToken = '',
   }) async {
+    String validToken = (accessToken != null && accessToken.isNotEmpty)
+        ? accessToken
+        : (FFAppState().bsptoken.isNotEmpty
+            ? FFAppState().bsptoken
+            : FFAppState().streetauth);
+    if (validToken.isEmpty) {
+      final auth = await StreetauthCall.call(forceRefresh: true);
+      final fresh = StreetauthCall.streettoken(auth.jsonBody);
+      if (fresh != null && fresh.isNotEmpty) {
+        validToken = fresh;
+        FFAppState().bsptoken = fresh;
+        FFAppState().streetauth = fresh;
+      }
+    }
+
     final ffApiRequestBody = '''
 {
   "theKey": "914",
@@ -6499,7 +6740,7 @@ class RevokeguestCall {
       apiUrl: 'https://api.mypingapi.com/sp/myhandler',
       callType: ApiCallType.POST,
       headers: {
-        'Authorization': 'Bearer ${accessToken}',
+        'Authorization': 'Bearer ${validToken}',
       },
       params: {},
       body: ffApiRequestBody,

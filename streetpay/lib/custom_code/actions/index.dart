@@ -8,6 +8,7 @@ export 'generate_transaction_receipt.dart' show generateTransactionReceipt;
 export 'generateseesionid.dart' show generateseesionid;
 export 'generatetransref.dart' show generatetransref;
 export 'encryptpass.dart' show encryptpass;
+export 'decryptpass.dart' show decryptpass;
 export 'handle_error.dart' show handleError;
 export 'getdeviceinfo.dart' show getdeviceinfo;
 export 'example_interceptor.dart' show exampleInterceptor;

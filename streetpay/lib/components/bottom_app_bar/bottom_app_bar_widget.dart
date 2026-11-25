@@ -1,9 +1,10 @@
-﻿import 'dart:ui';
+import 'dart:ui';
 import '/backend/api_requests/api_calls.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'bottom_app_bar_model.dart';
@@ -82,7 +83,9 @@ class _BottomAppBarWidgetState extends State<BottomAppBarWidget> {
             ),
           ),
         ),
-      ),
+      ).animate(delay: (80 + index * 35).ms)
+       .fadeIn(duration: 350.ms, curve: Curves.easeOut)
+       .slideY(begin: 0.25, end: 0, duration: 450.ms, curve: Curves.easeOutBack),
     );
   }
 
@@ -143,7 +146,9 @@ class _BottomAppBarWidgetState extends State<BottomAppBarWidget> {
             ],
           ),
         ),
-      ),
+      ).animate(delay: 160.ms)
+       .fadeIn(duration: 350.ms, curve: Curves.easeOut)
+       .scale(begin: const Offset(0.85, 0.85), end: const Offset(1.0, 1.0), duration: 500.ms, curve: Curves.easeOutBack),
     );
   }
 
@@ -280,7 +285,9 @@ class _BottomAppBarWidgetState extends State<BottomAppBarWidget> {
             ),
           ),
         ),
-      ),
+      ).animate()
+       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+       .slideY(begin: 0.35, end: 0, duration: 550.ms, curve: Curves.easeOutBack),
     );
   }
 }

@@ -132,9 +132,13 @@ class TransactionStruct extends BaseStruct {
         narration: data['narration'] as String?,
         amount: castToType<double>(data['amount']),
         referenceID: data['referenceID'] as String?,
-        transactionDate: data['transactionDate'] as DateTime?,
+        transactionDate: data['transactionDate'] is DateTime
+            ? data['transactionDate'] as DateTime
+            : (data['transactionDate'] != null
+                ? DateTime.tryParse(data['transactionDate'].toString())
+                : null),
         isReversed: data['isReversed'] as bool?,
-        isCardTransaction: data['isCardTransaction'] as bool?,
+        isCardTransaction: (data['isCardTransaction'] ?? data['isCardTransation']) as bool?,
         reversalReferenceNo: data['reversalReferenceNo'] as String?,
         uniqueIdentifier: data['uniqueIdentifier'] as String?,
         transactionDateString: data['transactionDateString'] as String?,

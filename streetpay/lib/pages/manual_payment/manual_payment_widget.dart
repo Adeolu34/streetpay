@@ -6,6 +6,10 @@ import '/services/beneficiary_service.dart';
 import '/services/bank_logo_service.dart';
 import '/services/account_lookup_service.dart';
 import '/services/bank_detection_service.dart';
+import '/services/scheduled_payment_service.dart';
+import '/services/local_vault_service.dart';
+import '/services/payment_guard_service.dart';
+import '/pages/payments/scheduled_payments/scheduled_payments_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
@@ -335,6 +339,373 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
       if (_model.accountname != null && _model.accountname!.isNotEmpty) return;
       _resolveAccount();
     });
+  }
+
+  void _openScheduleTransferModal(
+    BuildContext context, {
+    required String recipientName,
+    required String accountNumber,
+    required String bankName,
+    String? bankCode,
+    required double amount,
+    String narration = '',
+  }) {
+    DateTime currentScheduled = DateTime.now().add(const Duration(hours: 2));
+    final schedPinController = TextEditingController();
+    String? schedPinError;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final dateStr = DateFormat('EEE, MMM d, y').format(currentScheduled);
+            final timeStr = DateFormat('hh:mm a').format(currentScheduled);
+
+            return Container(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD6DDD8),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEDF7EE),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.schedule_rounded,
+                          color: Color(0xFF2F8F3C),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Schedule Transfer',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: const Color(0xFF101614),
+                              ),
+                            ),
+                            Text(
+                              'Pay ₦${amount.toStringAsFixed(2)} to $recipientName',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 12.5,
+                                color: const Color(0xFF6E7A72),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'WHEN SHOULD IT SEND?',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF8FA596),
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF6F8F6),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE6EAE7)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              final pickedDate = await showDatePicker(
+                                context: ctx,
+                                initialDate: currentScheduled,
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime.now().add(const Duration(days: 365)),
+                              );
+                              if (pickedDate != null) {
+                                setModalState(() {
+                                  currentScheduled = DateTime(
+                                    pickedDate.year,
+                                    pickedDate.month,
+                                    pickedDate.day,
+                                    currentScheduled.hour,
+                                    currentScheduled.minute,
+                                  );
+                                });
+                              }
+                            },
+                            child: Row(
+                              children: [
+                                const Icon(Icons.calendar_today_rounded, size: 16, color: Color(0xFF2F8F3C)),
+                                const SizedBox(width: 8),
+                                Text(
+                                  dateStr,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF101614),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Container(width: 1, height: 24, color: const Color(0xFFD6DDD8)),
+                        const SizedBox(width: 12),
+                        InkWell(
+                          onTap: () async {
+                            final pickedTime = await showTimePicker(
+                              context: ctx,
+                              initialTime: TimeOfDay.fromDateTime(currentScheduled),
+                            );
+                            if (pickedTime != null) {
+                              setModalState(() {
+                                currentScheduled = DateTime(
+                                  currentScheduled.year,
+                                  currentScheduled.month,
+                                  currentScheduled.day,
+                                  pickedTime.hour,
+                                  pickedTime.minute,
+                                );
+                              });
+                            }
+                          },
+                          child: Row(
+                            children: [
+                              const Icon(Icons.access_time_rounded, size: 16, color: Color(0xFF2F8F3C)),
+                              const SizedBox(width: 8),
+                              Text(
+                                timeStr,
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF101614),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ActionChip(
+                        label: Text('In 1 hr', style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                        onPressed: () {
+                          setModalState(() => currentScheduled = DateTime.now().add(const Duration(hours: 1)));
+                        },
+                      ),
+                      ActionChip(
+                        label: Text('In 2 hrs', style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                        onPressed: () {
+                          setModalState(() => currentScheduled = DateTime.now().add(const Duration(hours: 2)));
+                        },
+                      ),
+                      ActionChip(
+                        label: Text('Today 2:00 PM', style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                        onPressed: () {
+                          final now = DateTime.now();
+                          setModalState(() => currentScheduled = DateTime(now.year, now.month, now.day, 14, 0));
+                        },
+                      ),
+                      ActionChip(
+                        label: Text('Tomorrow 9 AM', style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                        onPressed: () {
+                          final tom = DateTime.now().add(const Duration(days: 1));
+                          setModalState(() => currentScheduled = DateTime(tom.year, tom.month, tom.day, 9, 0));
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'ENTER 5-DIGIT PIN TO AUTHORIZE SCHEDULE',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF8FA596),
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: schedPinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 5,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 14,
+                      color: const Color(0xFF101614),
+                    ),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      hintText: '•••••',
+                      hintStyle: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFF9AA79E),
+                        fontSize: 20,
+                        letterSpacing: 14,
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFFF6F8F6),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE6EAE7)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE6EAE7)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF2F8F3C), width: 1.5),
+                      ),
+                    ),
+                  ),
+                  if (schedPinError != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      schedPinError!,
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFFDC2626),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        final pin = schedPinController.text.trim();
+                        if (pin.length != 5) {
+                          setModalState(() =>
+                              schedPinError = 'Enter your 5-digit PIN to authorize schedule');
+                          return;
+                        }
+                        final double currentAvail = FFAppState().effectiveAvailableBalance;
+                        if (amount > currentAvail) {
+                          setModalState(() =>
+                              schedPinError = 'Insufficient available balance. You have ₦${FFAppState().availableBalanceString} available to schedule.');
+                          return;
+                        }
+                        Navigator.pop(ctx);
+                        await ScheduledPaymentService.createSchedule(
+                          title: 'Transfer to $recipientName',
+                          recipientName: recipientName,
+                          accountNumber: accountNumber,
+                          bankName: bankName,
+                          bankCode: bankCode,
+                          amount: amount,
+                          narration: narration,
+                          scheduledTime: currentScheduled,
+                          pin: pin,
+                        );
+
+                        // Save beneficiary immediately
+                        BeneficiaryService.saveBeneficiary(
+                          accountName: recipientName,
+                          accountNumber: accountNumber,
+                          bankName: bankName,
+                          bankCode: bankCode,
+                        );
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: const Color(0xFF0B2018),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.check_circle_rounded, color: Color(0xFF56B84B), size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Transfer scheduled for ${DateFormat('MMM d • h:mm a').format(currentScheduled)}',
+                                      style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 13),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                      context.pushNamed(ScheduledPaymentsWidget.routeName);
+                                    },
+                                    child: const Text('VIEW', style: TextStyle(color: Color(0xFF7FD472), fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0B2018),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: Text(
+                        'Confirm Schedule',
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _onBankSelected(String bankName, {String? bankCode, String? accountName}) async {
@@ -1300,8 +1671,12 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
   Widget build(BuildContext context) {
     context.watch<FFAppState>();
 
+    final double availBal = FFAppState().effectiveAvailableBalance;
+    final double ledgerBal = FFAppState().ledgerBalance;
+    final double reservedBal = FFAppState().reservedBalance;
+
     final balanceFormatted = formatNumber(
-      functions.stringtodouble(FFAppState().avalbal),
+      availBal,
       formatType: FormatType.decimal,
       decimalType: DecimalType.periodDecimal,
       currency: '₦',
@@ -1467,7 +1842,7 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'WALLET BALANCE',
+                                'AVAILABLE BALANCE',
                                 style: GoogleFonts.plusJakartaSans(
                                   color: const Color(0xFF8FA596),
                                   fontSize: 10.5,
@@ -1485,6 +1860,36 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                                   letterSpacing: -0.5,
                                 ),
                               ),
+                              if (reservedBal > 0)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.5),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.10),
+                                      borderRadius: BorderRadius.circular(8.0),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.15),
+                                        width: 0.7,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.lock_clock_rounded, size: 10.0, color: Color(0xFF7FD472)),
+                                        const SizedBox(width: 4.0),
+                                        Text(
+                                          'Ledger: ₦${formatNumber(ledgerBal, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)}  •  ₦${formatNumber(reservedBal, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)} held',
+                                          style: GoogleFonts.plusJakartaSans(
+                                            color: const Color(0xFFE2F7DF),
+                                            fontSize: 10.0,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                           const Spacer(),
@@ -1500,7 +1905,100 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    // --- Quick Send / Recent Recipients Horizontal Carousel ---
+                    if (_cachedBeneficiaries.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Text(
+                            'Recent Recipients',
+                            style: GoogleFonts.plusJakartaSans(
+                              color: const Color(0xFF101614),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            'Tap to autofill',
+                            style: GoogleFonts.plusJakartaSans(
+                              color: const Color(0xFF6E7A72),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 72,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: _cachedBeneficiaries.take(8).length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 10),
+                          itemBuilder: (context, idx) {
+                            final b = _cachedBeneficiaries[idx];
+                            final firstName = b.accountName.split(' ').first;
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () {
+                                _model.textController1?.text = b.accountNumber;
+                                _onBankSelected(
+                                  b.bankName,
+                                  bankCode: b.bankCode,
+                                  accountName: b.accountName,
+                                );
+                              },
+                              child: Container(
+                                width: 68,
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFFE6EAE7)),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF0B2018),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        b.initials,
+                                        style: GoogleFonts.plusJakartaSans(
+                                          color: const Color(0xFF7FD472),
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      firstName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: const Color(0xFF101614),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
 
                     // --- Main Recipient Card (Benchmark Standard: Account Number First -> Select Bank Below) ---
                     Container(
@@ -2243,12 +2741,9 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                       builder: (context) {
                         final double parsedAmount =
                             functions.stringtodouble(_model.textController3?.text);
-                        final double userBal =
-                            functions.stringtodouble(FFAppState().avalbal);
-                        final double stampDuty = parsedAmount >= 10000.0 ? 50.0 : 0.0;
-                        final double totalRequired = parsedAmount + stampDuty;
+                        final double availBal = FFAppState().ledgerBalance;
                         final bool isAmountValid = parsedAmount > 0;
-                        final bool isBalanceEnough = userBal >= totalRequired;
+                        final bool isBalanceEnough = (availBal <= 0) || (availBal >= parsedAmount);
                         final bool isSelfTransfer =
                             FFAppState().accountno == _model.textController1?.text;
                         final bool canProceed = hasAccountAndBank &&
@@ -2285,9 +2780,7 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 12.0),
                                 child: Text(
-                                  stampDuty > 0
-                                      ? 'Insufficient balance. ₦${formatNumber(totalRequired, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)} required (including ₦50 EMTL stamp duty on transfers ≥ ₦10,000). Available: $balanceFormatted'
-                                      : 'Insufficient wallet balance (available: $balanceFormatted)',
+                                  'Insufficient wallet balance (available: $balanceFormatted)',
                                   style: GoogleFonts.plusJakartaSans(
                                     color: const Color(0xFFD32F2F),
                                     fontSize: 12,
@@ -2300,6 +2793,36 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                               onPressed: !canProceed
                                   ? null
                                   : () async {
+                                      if (!PaymentGuardService.canTapButton()) return;
+                                      if (availBal > 0 && availBal < parsedAmount) {
+                                        LocalVaultService.recordTransaction(
+                                          ref: 'SP-FAIL-${DateTime.now().millisecondsSinceEpoch}',
+                                          amount: parsedAmount,
+                                          recipientName: displayName,
+                                          recipientAccount: _model.textController1!.text,
+                                          bankName: displayBank,
+                                          bankCode: _model.bankcode ?? '120001',
+                                          narration: valueOrDefault<String>(_model.textController4?.text, '-'),
+                                          status: 'Failed (Insufficient available balance)',
+                                          type: 'debit',
+                                        );
+
+                                        await showModalBottomSheet(
+                                          isScrollControlled: true,
+                                          backgroundColor: Colors.transparent,
+                                          enableDrag: false,
+                                          context: context,
+                                          builder: (context) {
+                                            return Padding(
+                                              padding: MediaQuery.viewInsetsOf(context),
+                                              child: ErrorcompWidget(
+                                                message: 'Insufficient balance. Your available balance is $balanceFormatted.',
+                                              ),
+                                            );
+                                          },
+                                        );
+                                        return;
+                                      }
                                       FFAppState().belong = false;
                                       FFAppState().addToListofaccounts(
                                           _model.textController1!.text);
@@ -2314,6 +2837,25 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                                       safeSetState(() {});
 
                                       // Generate transaction details
+                                      // Duplicate transfer guard (30s cooldown for same recipient & amount)
+                                      final cleanRecipientAcc = (_model.textController1?.text ?? '')
+                                          .replaceAll(RegExp(r'\D'), '');
+                                      final remainingCooldown =
+                                          PaymentGuardService.getRemainingCooldown(
+                                        accountNumber: cleanRecipientAcc,
+                                        amount: parsedAmount,
+                                      );
+                                      if (remainingCooldown > 0) {
+                                        PaymentGuardService.showDuplicateWarningDialog(
+                                          context: context,
+                                          recipientName: displayName,
+                                          accountNumber: cleanRecipientAcc,
+                                          amount: parsedAmount,
+                                          remainingSeconds: remainingCooldown,
+                                        );
+                                        return;
+                                      }
+
                                       _model.transref =
                                           await actions.generatetransref();
                                       _model.sessionid =
@@ -2372,6 +2914,27 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                                           _model.payrecipt = transferSuccess == true);
 
                                       if (transferSuccess == true && mounted) {
+                                        final cleanAcc = _model.textController1?.text.trim() ?? '';
+                                        if (cleanAcc.isNotEmpty && displayName.isNotEmpty) {
+                                          BeneficiaryService.saveBeneficiary(
+                                            accountName: displayName,
+                                            accountNumber: cleanAcc,
+                                            bankName: displayBank,
+                                            bankCode: cleanBCode,
+                                          );
+                                        }
+                                        LocalVaultService.recordTransaction(
+                                          ref: _model.transref ?? 'SP-${DateTime.now().millisecondsSinceEpoch}',
+                                          amount: parsedAmount,
+                                          recipientName: displayName,
+                                          recipientAccount: cleanAcc,
+                                          bankName: displayBank,
+                                          bankCode: cleanBCode,
+                                          narration: valueOrDefault<String>(_model.textController4?.text, '-'),
+                                          status: 'Successful',
+                                          type: 'debit',
+                                        );
+
                                         await showModalBottomSheet(
                                           isScrollControlled: true,
                                           backgroundColor: Colors.transparent,
@@ -2448,6 +3011,54 @@ class _ManualPaymentWidgetState extends State<ManualPaymentWidget> {
                                 disabledTextColor: const Color(0xFF6E7A72),
                               ),
                               showLoadingIndicator: false,
+                            ),
+                            const SizedBox(height: 12),
+                            Builder(
+                              builder: (context) {
+                                final schedBankCode = (_model.bankcode == null ||
+                                        _model.bankcode!.isEmpty ||
+                                        _model.bankcode!.toLowerCase().contains('streetpay') ||
+                                        _model.bankcode == '000000')
+                                    ? '120001'
+                                    : _model.bankcode!;
+                                return SizedBox(
+                                  width: double.infinity,
+                                  height: 48.0,
+                                  child: OutlinedButton.icon(
+                                    onPressed: !canProceed
+                                        ? null
+                                        : () => _openScheduleTransferModal(
+                                              context,
+                                              recipientName: displayName,
+                                              accountNumber: _model.textController1!.text.trim(),
+                                              bankName: displayBank,
+                                              bankCode: schedBankCode,
+                                              amount: parsedAmount,
+                                              narration: valueOrDefault<String>(_model.textController4?.text, '-'),
+                                            ),
+                                    icon: const Icon(
+                                      Icons.schedule_rounded,
+                                      color: Color(0xFF2F8F3C),
+                                      size: 18,
+                                    ),
+                                    label: Text(
+                                      'Schedule for Later',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        color: const Color(0xFF101614),
+                                        fontSize: 14.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      side: const BorderSide(color: Color(0xFFD0EBD2)),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14.0),
+                                      ),
+                                      backgroundColor: const Color(0xFFF3F8F4),
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         );

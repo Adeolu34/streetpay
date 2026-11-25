@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'local_vault_service.dart';
 
 class BeneficiaryItem {
   final String accountName;
@@ -44,29 +45,75 @@ class BeneficiaryItem {
 
 class BeneficiaryService {
   static const String _storageKey = 'sp_recent_beneficiaries_v1';
-  static const int _maxBeneficiaries = 15;
+  static const int _maxBeneficiaries = 150;
   static List<BeneficiaryItem>? _cachedBeneficiaries;
 
   /// Retrieve list of recent beneficiaries sorted by most recently used
   static Future<List<BeneficiaryItem>> getRecentBeneficiaries({bool forceRefresh = false}) async {
-    if (!forceRefresh && _cachedBeneficiaries != null) {
+    if (!forceRefresh && _cachedBeneficiaries != null && _cachedBeneficiaries!.isNotEmpty) {
       return List<BeneficiaryItem>.from(_cachedBeneficiaries!);
     }
     try {
       final prefs = await SharedPreferences.getInstance();
       final rawList = prefs.getStringList(_storageKey) ?? [];
-      final List<BeneficiaryItem> list = [];
+      final Map<String, BeneficiaryItem> mergedMap = {};
 
+      // 1. Read from SharedPreferences
       for (final raw in rawList) {
         try {
           final map = jsonDecode(raw) as Map<String, dynamic>;
-          list.add(BeneficiaryItem.fromJson(map));
+          final item = BeneficiaryItem.fromJson(map);
+          final key = item.accountNumber.replaceAll(RegExp(r'\s+'), '').trim();
+          if (key.isNotEmpty) {
+            mergedMap[key] = item;
+          }
         } catch (_) {}
       }
 
+      // 2. Read from persistent SQLite vault (authoritative storage)
+      final vaultList = await LocalVaultService.getBeneficiaries(limit: _maxBeneficiaries);
+      for (final row in vaultList) {
+        final acc = (row['account_number'] as String?)?.replaceAll(RegExp(r'\s+'), '').trim() ?? '';
+        if (acc.isEmpty) continue;
+
+        final name = (row['account_name'] as String?)?.trim() ?? '';
+        final bank = (row['bank_name'] as String?)?.trim() ?? 'Bank';
+        final code = row['bank_code'] as String?;
+        final time = row['last_used'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(row['last_used'] as int)
+            : DateTime.now();
+
+        if (mergedMap.containsKey(acc)) {
+          final existing = mergedMap[acc]!;
+          // Merge keeping best name/bank and latest timestamp
+          mergedMap[acc] = BeneficiaryItem(
+            accountName: existing.accountName.isNotEmpty ? existing.accountName : name,
+            accountNumber: acc,
+            bankName: existing.bankName.isNotEmpty && existing.bankName != 'Bank' ? existing.bankName : bank,
+            bankCode: existing.bankCode ?? code,
+            lastUsed: existing.lastUsed.isAfter(time) ? existing.lastUsed : time,
+          );
+        } else {
+          mergedMap[acc] = BeneficiaryItem(
+            accountName: name.isNotEmpty ? name : acc,
+            accountNumber: acc,
+            bankName: bank.isNotEmpty ? bank : 'Bank',
+            bankCode: code,
+            lastUsed: time,
+          );
+        }
+      }
+
+      final list = mergedMap.values.toList();
       list.sort((a, b) => b.lastUsed.compareTo(a.lastUsed));
-      _cachedBeneficiaries = list;
-      return list;
+
+      final cappedList = list.take(_maxBeneficiaries).toList();
+      // Keep SharedPreferences refreshed and synced with SQLite
+      final stringList = cappedList.map((e) => jsonEncode(e.toJson())).toList();
+      await prefs.setStringList(_storageKey, stringList);
+
+      _cachedBeneficiaries = cappedList;
+      return List<BeneficiaryItem>.from(cappedList);
     } catch (_) {
       return [];
     }
@@ -79,21 +126,28 @@ class BeneficiaryService {
     required String bankName,
     String? bankCode,
   }) async {
-    final cleanAccount = accountNumber.trim();
+    final cleanAccount = accountNumber.replaceAll(RegExp(r'\s+'), '').trim();
     final cleanName = accountName.trim();
-    final cleanBank = bankName.trim();
+    final cleanBank = bankName.trim().isNotEmpty ? bankName.trim() : 'Bank';
 
-    if (cleanAccount.isEmpty || cleanBank.isEmpty) return;
+    if (cleanAccount.isEmpty) return;
 
     try {
-      final currentList = await getRecentBeneficiaries();
-
-      // Remove any existing entry matching both account number and bank
-      currentList.removeWhere(
-        (item) => item.accountNumber == cleanAccount && item.bankName.toLowerCase() == cleanBank.toLowerCase(),
+      // 1. Save to SQLite LocalVaultService (uninstall-proof mirrored database)
+      await LocalVaultService.saveBeneficiary(
+        accountName: cleanName.isNotEmpty ? cleanName : cleanAccount,
+        accountNumber: cleanAccount,
+        bankName: cleanBank,
+        bankCode: bankCode,
       );
 
-      // Insert fresh entry at top
+      // 2. Update fast SharedPreferences cache
+      final currentList = await getRecentBeneficiaries();
+
+      currentList.removeWhere(
+        (item) => item.accountNumber.replaceAll(RegExp(r'\s+'), '') == cleanAccount,
+      );
+
       currentList.insert(
         0,
         BeneficiaryItem(
@@ -105,9 +159,7 @@ class BeneficiaryService {
         ),
       );
 
-      // Truncate to maximum capacity
       final cappedList = currentList.take(_maxBeneficiaries).toList();
-
       final prefs = await SharedPreferences.getInstance();
       final stringList = cappedList.map((e) => jsonEncode(e.toJson())).toList();
       await prefs.setStringList(_storageKey, stringList);
@@ -118,6 +170,8 @@ class BeneficiaryService {
   /// Delete a single beneficiary by account number
   static Future<void> deleteBeneficiary(String accountNumber, String bankName) async {
     try {
+      await LocalVaultService.deleteBeneficiary(accountNumber);
+
       final currentList = await getRecentBeneficiaries();
       currentList.removeWhere(
         (item) =>

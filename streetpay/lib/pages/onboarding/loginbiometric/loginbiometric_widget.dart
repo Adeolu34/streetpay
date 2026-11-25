@@ -5,6 +5,7 @@ import '/custom_code/actions/index.dart' as actions;
 import '/flutter_flow/custom_functions.dart' as functions;
 import '/index.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:provider/provider.dart';
@@ -202,6 +203,8 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
         final bal = IspincodevalidCall.accountbalanace(_model.ispincode?.jsonBody ?? '');
         if (bal != null && bal.isNotEmpty) {
           FFAppState().avalbal = bal;
+        } else if (FFAppState().avalbal.isEmpty) {
+          FFAppState().avalbal = '0.00';
         }
         final wid = IspincodevalidCall.walletid(_model.ispincode?.jsonBody ?? '');
         if (wid != null && wid.isNotEmpty) {
@@ -415,7 +418,9 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                             ),
                           ),
                         ],
-                      ),
+                      ).animate()
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: -0.2, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
 
                       const SizedBox(height: 24.0),
 
@@ -429,7 +434,9 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                           letterSpacing: -0.8,
                           height: 1.18,
                         ),
-                      ),
+                      ).animate(delay: 100.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.15, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
                       const SizedBox(height: 10.0),
                       Text(
                         'Your 9PSB StreetPay wallet, bills and payouts in one place.',
@@ -439,7 +446,9 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                           color: const Color(0xFF8FA596),
                           height: 1.45,
                         ),
-                      ),
+                      ).animate(delay: 150.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.15, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
 
                       const SizedBox(height: 32.0),
 
@@ -575,7 +584,10 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                             ),
                           ],
                         ),
-                      ),
+                      ).animate(delay: 200.ms)
+                       .fadeIn(duration: 500.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.25, end: 0, duration: 550.ms, curve: Curves.easeOutBack)
+                       .scale(begin: const Offset(0.96, 0.96), end: const Offset(1.0, 1.0), duration: 550.ms, curve: Curves.easeOutBack),
 
                       const SizedBox(height: 20.0),
 
@@ -597,7 +609,10 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                           elevation: 0.0,
                           borderRadius: BorderRadius.circular(16.0),
                         ),
-                      ),
+                      ).animate(delay: 280.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.2, end: 0, duration: 450.ms, curve: Curves.easeOutBack)
+                       .scale(begin: const Offset(0.95, 0.95), end: const Offset(1.0, 1.0), duration: 450.ms, curve: Curves.easeOutBack),
 
                       const SizedBox(height: 14.0),
 
@@ -662,7 +677,9 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                                   ],
                           ),
                         ),
-                      ),
+                      ).animate(delay: 340.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .scale(begin: const Offset(0.92, 0.92), end: const Offset(1.0, 1.0), duration: 450.ms, curve: Curves.easeOutBack),
 
                       const Spacer(),
 
@@ -738,7 +755,9 @@ class _LoginbiometricWidgetState extends State<LoginbiometricWidget> {
                             ],
                           ),
                         ),
-                      ),
+                      ).animate(delay: 420.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.1, end: 0, duration: 400.ms, curve: Curves.easeOut),
                     ],
                   ),
                 ),

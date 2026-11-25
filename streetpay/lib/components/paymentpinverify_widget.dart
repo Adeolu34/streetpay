@@ -1,11 +1,17 @@
 import '/backend/api_requests/api_calls.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/custom_functions.dart' as functions;
+import '/custom_code/actions/index.dart' as actions;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:local_auth/local_auth.dart';
+import '/services/tts_service.dart';
+import '/services/beneficiary_service.dart';
+import '/services/local_vault_service.dart';
+import '/services/payment_guard_service.dart';
 import 'paymentpinverify_model.dart';
 export 'paymentpinverify_model.dart';
 
@@ -255,6 +261,33 @@ class _PaymentpinverifyWidgetState extends State<PaymentpinverifyWidget> {
   }
 
   Future<void> _submitPayment({bool viaFingerprint = false}) async {
+    final cleanAcc = widget.customeraccountno?.replaceAll(RegExp(r'\D'), '') ?? '';
+    final amt = widget.amount ?? 0.0;
+
+    final remainingCooldown = PaymentGuardService.getRemainingCooldown(
+      accountNumber: cleanAcc,
+      amount: amt,
+    );
+    if (remainingCooldown > 0) {
+      PaymentGuardService.showDuplicateWarningDialog(
+        context: context,
+        recipientName: widget.customername ?? 'beneficiary',
+        accountNumber: cleanAcc,
+        amount: amt,
+        remainingSeconds: remainingCooldown,
+      );
+      return;
+    }
+
+    if (!PaymentGuardService.acquireLock()) {
+      setState(() {
+        _isProcessing = false;
+        _pin = '';
+        _errorMessage = 'A payment is already being processed. Please wait.';
+      });
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
       _errorMessage = null;
@@ -295,40 +328,97 @@ class _PaymentpinverifyWidgetState extends State<PaymentpinverifyWidget> {
           ),
         );
       }
+    } finally {
+      PaymentGuardService.releaseLock();
+      if (mounted && _isProcessing) {
+        setState(() => _isProcessing = false);
+      }
     }
   }
 
   Future<void> _doSubmitPayment({bool viaFingerprint = false}) async {
     try {
-      bool pinValid;
+      bool pinValid = false;
+      String pinToVerify = _model.pinCodeController!.text;
 
       if (viaFingerprint) {
-        // Biometric already verified identity — skip PIN check, use existing session
-        pinValid = true;
-      } else {
-        _model.pincode = await IspincodevalidCall.call(
-          phoneno: functions.removecode(FFAppState().phonenumber),
-          pincode: _model.pinCodeController!.text,
-          accessToken: FFAppState().bsptoken,
-          deviceid: FFAppState().deviceid,
-        );
-
-        final session = IspincodevalidCall.sessionid(
-          (_model.pincode?.jsonBody ?? ''),
-        );
-        if (session != null) {
-          FFAppState().sessionid = session;
+        // Retrieve encrypted user PIN from secure storage
+        const storage = FlutterSecureStorage();
+        final encPin = await storage.read(key: 'sp_user_pin');
+        if (encPin != null && encPin.isNotEmpty) {
+          pinToVerify = await actions.decryptpass(encPin);
         }
-
-        pinValid = IspincodevalidCall.success(_model.pincode?.jsonBody ?? '') == true;
+        if (pinToVerify.isEmpty || pinToVerify.length < 4) {
+          if (mounted) {
+            setState(() {
+              _isProcessing = false;
+              _pin = '';
+              _errorMessage = 'Please enter your 5-digit PIN to enable fingerprint payments.';
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please enter your 5-digit PIN to enable fingerprint payments.'),
+                backgroundColor: Color(0xFF2E7D32),
+              ),
+            );
+          }
+          return;
+        }
       }
 
+      // Proactively refresh token
+      try {
+        final authRes = await StreetauthCall.call(forceRefresh: true);
+        final fresh = StreetauthCall.streettoken(authRes.jsonBody);
+        if (fresh != null && fresh.isNotEmpty) {
+          FFAppState().bsptoken = fresh;
+        }
+      } catch (_) {}
+
+      _model.pincode = await IspincodevalidCall.call(
+        phoneno: functions.removecode(FFAppState().phonenumber),
+        pincode: pinToVerify,
+        accessToken: FFAppState().bsptoken,
+        deviceid: FFAppState().deviceid,
+      );
+
+      final session = IspincodevalidCall.sessionid(
+        (_model.pincode?.jsonBody ?? ''),
+      );
+      if (session != null && session.isNotEmpty) {
+        FFAppState().sessionid = session;
+      }
+
+      pinValid = IspincodevalidCall.success(_model.pincode?.jsonBody ?? '') == true;
+
       if (pinValid) {
+        // Save PIN securely for future fingerprint transactions
+        try {
+          const storage = FlutterSecureStorage();
+          final enc = await actions.encryptpass(pinToVerify);
+          await storage.write(key: 'sp_user_pin', value: enc);
+        } catch (_) {}
+
+        final sessionToUse = (FFAppState().sessionid.isNotEmpty)
+            ? FFAppState().sessionid
+            : (widget.sectionid ?? await actions.generateseesionid());
+
         _model.transtoken = await GettransactiontokenCall.call(
           accessToken: FFAppState().bsptoken,
           accountno: FFAppState().accountno,
           deviceid: FFAppState().deviceid,
-          sessionid: FFAppState().sessionid,
+          sessionid: sessionToUse,
+        );
+
+        final refId = GettransactiontokenCall.transtoken(
+          (_model.transtoken?.jsonBody ?? ''),
+        );
+
+        final cleanAcc = widget.customeraccountno?.replaceAll(RegExp(r'\D'), '') ?? '';
+        final amt = widget.amount ?? 0.0;
+        PaymentGuardService.recordPaymentAttempt(
+          accountNumber: cleanAcc,
+          amount: amt,
         );
 
         _model.othertrans = await WalletAsAServiceGroup.otherBankTransferCall.call(
@@ -341,16 +431,49 @@ class _PaymentpinverifyWidgetState extends State<PaymentpinverifyWidget> {
           amount: widget.amount?.toString(),
           description: valueOrDefault<String>(widget.description, '-'),
           refrence: widget.refrence,
-          sectionid: widget.sectionid,
+          sectionid: sessionToUse,
           authToken: FFAppState().bsptoken,
-          refid: GettransactiontokenCall.transtoken(
-            (_model.transtoken?.jsonBody ?? ''),
-          ),
+          refid: refId,
         );
 
         if (WalletAsAServiceGroup.otherBankTransferCall
                 .success(_model.othertrans?.jsonBody ?? '') ==
             true) {
+          // Permanently save beneficiary to local SQLite & mirror storage
+          final cleanAcc = widget.customeraccountno?.trim() ?? '';
+          final cleanName = widget.customername?.trim() ?? '';
+          final bCode = widget.customeraccount?.trim() ?? '';
+          String bName = '';
+          if (bCode.isNotEmpty) {
+            bName = functions.getBankName(FFAppState().allbankjson, bCode);
+          }
+          if (cleanAcc.isNotEmpty && cleanName.isNotEmpty) {
+            BeneficiaryService.saveBeneficiary(
+              accountName: cleanName,
+              accountNumber: cleanAcc,
+              bankName: bName.isNotEmpty ? bName : 'Bank',
+              bankCode: bCode,
+            );
+          }
+
+          // Record transaction into persistent SQLite vault
+          LocalVaultService.recordTransaction(
+            ref: widget.refrence ?? 'TXN-${DateTime.now().millisecondsSinceEpoch}',
+            amount: (widget.amount as num?)?.toDouble() ?? 0.0,
+            recipientName: cleanName,
+            recipientAccount: cleanAcc,
+            bankCode: widget.customeraccount,
+            narration: valueOrDefault<String>(widget.description, '-'),
+            status: 'Successful',
+            type: 'debit',
+          );
+
+          if (FFAppState().voiceAnnouncementsActivated) {
+            TtsService.instance.announcePaymentSent(
+              amount: widget.amount?.toString() ?? '',
+              recipientName: widget.customername ?? 'beneficiary',
+            );
+          }
           if (mounted) {
             Navigator.pop(context, true);
           }
@@ -453,20 +576,23 @@ class _PaymentpinverifyWidgetState extends State<PaymentpinverifyWidget> {
       currency: '₦',
     );
 
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF6F8F6),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24.0),
-          topRight: Radius.circular(24.0),
+    return PopScope(
+      canPop: !_isProcessing,
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          color: Color(0xFFF6F8F6),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24.0),
+            topRight: Radius.circular(24.0),
+          ),
         ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: _isProcessing
-            ? _buildProcessingView(formattedAmount)
-            : _buildPinInputView(formattedAmount),
+        child: SafeArea(
+          top: false,
+          child: _isProcessing
+              ? _buildProcessingView(formattedAmount)
+              : _buildPinInputView(formattedAmount),
+        ),
       ),
     );
   }

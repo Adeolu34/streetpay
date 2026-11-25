@@ -6,6 +6,8 @@ import '/components/transaction_card/transaction_card_widget.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/custom_functions.dart' as functions;
+import '/services/local_vault_service.dart';
+import '/services/transaction_parser_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -37,6 +39,18 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
 
   bool _isLoading = false;
   int _selectedFilterIndex = 1; // 0: 7 Days, 1: 30 Days, 2: Custom
+  String _selectedCategory = 'all';
+
+  static const List<Map<String, dynamic>> _categories = [
+    {'id': 'all', 'label': 'All', 'icon': Icons.tune_rounded},
+    {'id': 'transfer_in', 'label': 'Transfer In', 'icon': Icons.arrow_downward_rounded},
+    {'id': 'transfer_out', 'label': 'Transfer Out', 'icon': Icons.arrow_upward_rounded},
+    {'id': 'airtime', 'label': 'Airtime', 'icon': Icons.phone_android_rounded},
+    {'id': 'data', 'label': 'Data', 'icon': Icons.wifi_rounded},
+    {'id': 'bills', 'label': 'Bill Payment', 'icon': Icons.receipt_long_rounded},
+    {'id': 'reversal', 'label': 'Reversals', 'icon': Icons.undo_rounded},
+    {'id': 'fee', 'label': 'Stamp Duty & Fees', 'icon': Icons.receipt_long_rounded},
+  ];
 
   @override
   void initState() {
@@ -97,15 +111,104 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
         todate: toDate,
       );
 
+      final localTx = await LocalVaultService.getTransactions(limit: 100);
+
       if (!mounted) return;
 
       final historyData =
           WalletAsAServiceGroup.wallethistoryCall.message(res.jsonBody ?? '');
+
+      final List<dynamic> combined = [];
+      final Set<String> seenRefs = {};
+      final Set<String> seenSignatures = {};
+
+      // 1. Add authoritative server transactions first
       if (historyData != null) {
-        FFAppState().transactionhistory = historyData.toList().cast<dynamic>();
-      } else {
-        FFAppState().transactionhistory = [];
+        for (final item in historyData) {
+          final refId = (getJsonField(item, r'''$.referenceID''')?.toString() ?? '').trim();
+          final uniqueId = (getJsonField(item, r'''$.uniqueIdentifier''')?.toString() ?? '').trim();
+          final ref = (getJsonField(item, r'''$.reference''')?.toString() ??
+              getJsonField(item, r'''$.paymentReference''')?.toString() ??
+              '').trim();
+
+          final primaryKey = refId.isNotEmpty ? refId : (uniqueId.isNotEmpty ? uniqueId : ref);
+          if (primaryKey.isNotEmpty && seenRefs.contains(primaryKey)) continue;
+
+          if (refId.isNotEmpty) seenRefs.add(refId);
+          if (uniqueId.isNotEmpty) seenRefs.add(uniqueId);
+          if (ref.isNotEmpty) seenRefs.add(ref);
+
+          final amt = (getJsonField(item, r'''$.amount''') as num?)?.toDouble() ?? 0.0;
+          final dateStr = (getJsonField(item, r'''$.transactionDateString''')?.toString() ??
+              getJsonField(item, r'''$.transactionDate''')?.toString() ??
+              '').trim();
+          final narr = (getJsonField(item, r'''$.narration''')?.toString() ?? '').trim();
+
+          // Create composite signature to identify and avoid local duplication
+          final dateDay = dateStr.length >= 10 ? dateStr.substring(0, 10) : dateStr;
+          final narrSnip = narr.length >= 8 ? narr.substring(0, 8) : narr;
+          seenSignatures.add('${amt.toStringAsFixed(2)}_${dateDay}_$narrSnip');
+
+          combined.add(item);
+        }
       }
+
+      // 2. Add local vault transactions ONLY if not already in server records (e.g. pending/failed/recent)
+      for (final t in localTx) {
+        final ref = (t['ref'] ?? '').toString().trim();
+        final amt = (t['amount'] as num?)?.toDouble() ?? 0.0;
+        final amtStr = amt.toStringAsFixed(2);
+        final dt = DateTime.fromMillisecondsSinceEpoch(
+            (t['timestamp'] as int?) ?? DateTime.now().millisecondsSinceEpoch);
+        final dateStr = DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
+        final dateDay = DateFormat('yyyy-MM-dd').format(dt);
+        final isCredit = t['type'] == 'credit';
+
+        final localNarr = (t['narration'] != null &&
+                t['narration'].toString().trim().isNotEmpty &&
+                t['narration'].toString().trim() != '-')
+            ? t['narration'].toString().trim()
+            : '';
+        final recipient = (t['recipient_name'] != null &&
+                t['recipient_name'].toString().trim().isNotEmpty &&
+                t['recipient_name'].toString().trim() != '-')
+            ? t['recipient_name'].toString().trim()
+            : '';
+        final cleanNarr = localNarr.isNotEmpty
+            ? localNarr
+            : (recipient.isNotEmpty
+                ? (isCredit ? 'Transfer from $recipient' : 'Transfer to $recipient')
+                : (isCredit ? 'Incoming Transfer' : 'Transfer Out'));
+
+        // Skip if already seen by ref
+        if (ref.isNotEmpty && seenRefs.contains(ref)) continue;
+
+        // Skip if composite signature matches an existing server item
+        final narrSnip = cleanNarr.length >= 8 ? cleanNarr.substring(0, 8) : cleanNarr;
+        final sig = '${amt.toStringAsFixed(2)}_${dateDay}_$narrSnip';
+        if (seenSignatures.contains(sig)) continue;
+
+        if (ref.isNotEmpty) seenRefs.add(ref);
+        seenSignatures.add(sig);
+
+        // Prepend local unsynced item
+        combined.insert(0, {
+          'reference': ref,
+          'referenceID': ref,
+          'uniqueIdentifier': ref,
+          'narration': cleanNarr,
+          'recipient_name': recipient,
+          'transactionDateString': dateStr,
+          'credit': isCredit ? amtStr : '',
+          'debit': isCredit ? '' : amtStr,
+          'amount': amt,
+          'status': t['status'] ?? 'Successful',
+          'isLocal': true,
+          'timestamp': (t['timestamp'] as int?) ?? 0,
+        });
+      }
+
+      FFAppState().transactionhistory = combined;
     } catch (e) {
       // Silently handle or keep current data
     } finally {
@@ -256,6 +359,44 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
     _fetchTransactions(fromDate: fromStr, toDate: toStr);
   }
 
+  bool _matchesCategory(dynamic item, String category) {
+    if (category == 'all') return true;
+    final parsed = TransactionParserService.parse(item);
+    switch (category) {
+      case 'transfer_in':
+        return parsed.isCredit && !parsed.isReversalCredit && parsed.category != 'fee';
+      case 'transfer_out':
+        return !parsed.isCredit && !parsed.isReversed && parsed.category == 'transfer_out';
+      case 'airtime':
+        return parsed.category == 'airtime';
+      case 'data':
+        return parsed.category == 'data';
+      case 'bills':
+      case 'bill_payment':
+      case 'electricity':
+        return parsed.category == 'bill_payment' || parsed.category == 'electricity';
+      case 'reversal':
+        return parsed.isReversed || parsed.isReversalCredit || parsed.category == 'reversal';
+      case 'fee':
+        return parsed.category == 'fee';
+      default:
+        return true;
+    }
+  }
+
+  int _getCategoryCount(List<dynamic> list, String category) {
+    if (category == 'all') return list.length;
+    return list.where((item) => _matchesCategory(item, category)).length;
+  }
+
+  String _getCategoryDisplayName(String category) {
+    final match = _categories.firstWhere(
+      (c) => c['id'] == category,
+      orElse: () => {'label': 'Transactions'},
+    );
+    return match['label'] as String;
+  }
+
   Widget _buildFilterChip(String label, int index) {
     final isSelected = _selectedFilterIndex == index;
     return Material(
@@ -316,7 +457,7 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                   children: [
                     Container(
                       width: 130.0,
-                      height: 14.0,
+                      height: 13.0,
                       decoration: BoxDecoration(
                         color: const Color(0xFFF3F4F6),
                         borderRadius: BorderRadius.circular(4.0),
@@ -324,7 +465,7 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                     ),
                     const SizedBox(height: 6.0),
                     Container(
-                      width: 80.0,
+                      width: 90.0,
                       height: 10.0,
                       decoration: BoxDecoration(
                         color: const Color(0xFFF3F4F6),
@@ -339,7 +480,7 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
-                    width: 70.0,
+                    width: 65.0,
                     height: 14.0,
                     decoration: BoxDecoration(
                       color: const Color(0xFFF3F4F6),
@@ -387,6 +528,11 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
     final toDateLabel = _model.datePicked2 != null
         ? DateFormat('MMM dd, yyyy').format(_model.datePicked2!)
         : 'To Date';
+
+    // Apply category filtering
+    final filteredList = translist
+        .where((item) => _matchesCategory(item, _selectedCategory))
+        .toList();
 
     return GestureDetector(
       onTap: () {
@@ -637,14 +783,103 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20.0),
+                      const SizedBox(height: 16.0),
 
-                      // Section Title: History
+                      // Multi-Category Filter Chips (Horizontally Scrollable)
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        child: Row(
+                          children: _categories.map((cat) {
+                            final catId = cat['id'] as String;
+                            final isSelected = _selectedCategory == catId;
+                            final count = _getCategoryCount(translist, catId);
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8.0),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () {
+                                    HapticFeedback.selectionClick();
+                                    setState(() {
+                                      _selectedCategory = catId;
+                                    });
+                                  },
+                                  borderRadius: BorderRadius.circular(20.0),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 180),
+                                    padding: const EdgeInsets.symmetric(horizontal: 13.0, vertical: 7.5),
+                                    decoration: BoxDecoration(
+                                      color: isSelected ? const Color(0xFF00A651) : Colors.white,
+                                      borderRadius: BorderRadius.circular(20.0),
+                                      border: Border.all(
+                                        color: isSelected ? const Color(0xFF00A651) : const Color(0xFFE5E7EB),
+                                        width: isSelected ? 1.5 : 1.0,
+                                      ),
+                                      boxShadow: isSelected
+                                          ? [
+                                              BoxShadow(
+                                                color: const Color(0xFF00A651).withValues(alpha: 0.22),
+                                                blurRadius: 8.0,
+                                                offset: const Offset(0.0, 2.0),
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          cat['icon'] as IconData,
+                                          size: 14.5,
+                                          color: isSelected ? Colors.white : const Color(0xFF4B5563),
+                                        ),
+                                        const SizedBox(width: 6.0),
+                                        Text(
+                                          cat['label'] as String,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12.0,
+                                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                            color: isSelected ? Colors.white : const Color(0xFF374151),
+                                          ),
+                                        ),
+                                        if (count > 0 && !isSelected) ...[
+                                          const SizedBox(width: 6.0),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 1.5),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF3F4F6),
+                                              borderRadius: BorderRadius.circular(10.0),
+                                            ),
+                                            child: Text(
+                                              '$count',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 10.0,
+                                                fontWeight: FontWeight.w700,
+                                                color: const Color(0xFF6B7280),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 18.0),
+
+                      // Section Title: History & Count
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Activity History',
+                            _selectedCategory == 'all'
+                                ? 'Activity History'
+                                : _getCategoryDisplayName(_selectedCategory),
                             style: GoogleFonts.inter(
                               fontSize: 15.0,
                               fontWeight: FontWeight.bold,
@@ -653,7 +888,9 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                           ),
                           if (!_isLoading && translist.isNotEmpty)
                             Text(
-                              '${translist.length} transactions',
+                              _selectedCategory == 'all'
+                                  ? '${translist.length} transactions'
+                                  : '${filteredList.length} of ${translist.length}',
                               style: GoogleFonts.inter(
                                 fontSize: 12.0,
                                 fontWeight: FontWeight.w500,
@@ -667,7 +904,7 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                       // Transactions List State
                       if (_isLoading)
                         _buildLoadingSkeleton()
-                      else if (translist.isEmpty)
+                      else if (filteredList.isEmpty)
                         Center(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 40.0),
@@ -690,7 +927,9 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                                 ),
                                 const SizedBox(height: 14.0),
                                 Text(
-                                  'No Transactions Found',
+                                  _selectedCategory == 'all'
+                                      ? 'No Transactions Found'
+                                      : 'No ${_getCategoryDisplayName(_selectedCategory)}',
                                   style: GoogleFonts.inter(
                                     fontSize: 15.0,
                                     fontWeight: FontWeight.w700,
@@ -699,7 +938,9 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                                 ),
                                 const SizedBox(height: 6.0),
                                 Text(
-                                  'No activity recorded for the selected period.',
+                                  _selectedCategory == 'all'
+                                      ? 'No activity recorded for the selected period.'
+                                      : 'No activity found matching the selected filter.',
                                   textAlign: TextAlign.center,
                                   style: GoogleFonts.inter(
                                     fontSize: 12.5,
@@ -714,10 +955,10 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                         ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: translist.length,
+                          itemCount: filteredList.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 8.0),
                           itemBuilder: (context, index) {
-                            final item = translist[index];
+                            final item = filteredList[index];
                             final narration = getJsonField(
                                   item,
                                   r'''$.narration''',
@@ -742,8 +983,13 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
                             final cleanTitle = functions
                                 .processTransactionNarration(narration);
 
+                            final refKey = getJsonField(item, r'''$.referenceID''') ??
+                                getJsonField(item, r'''$.uniqueIdentifier''') ??
+                                getJsonField(item, r'''$.reference''') ??
+                                'tx_$index';
+
                             return TransactionCardWidget(
-                              key: ValueKey('tx_${index}_${dateStr}_$credit$debit'),
+                              key: ValueKey('${refKey}_$index'),
                               credittitle: cleanTitle,
                               creditsubtitle: dateStr,
                               creditamount: credit,

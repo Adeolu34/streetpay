@@ -6,6 +6,7 @@ import '/flutter_flow/custom_functions.dart' as functions;
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -247,10 +248,13 @@ class _Login1WidgetState extends State<Login1Widget> {
           FFAppState().accountname =
               IspincodevalidCall.fullname(_model.pincodevalid?.jsonBody ?? '') ??
                   '';
-          FFAppState().avalbal =
-              IspincodevalidCall.accountbalanace(
-                      _model.pincodevalid?.jsonBody ?? '') ??
-                  '';
+          final bal = IspincodevalidCall.accountbalanace(
+                  _model.pincodevalid?.jsonBody ?? '');
+          if (bal != null && bal.isNotEmpty) {
+            FFAppState().avalbal = bal;
+          } else if (FFAppState().avalbal.isEmpty) {
+            FFAppState().avalbal = '0.00';
+          }
           FFAppState().walletid =
               IspincodevalidCall.walletid(_model.pincodevalid?.jsonBody ?? '') ??
                   '';
@@ -259,6 +263,11 @@ class _Login1WidgetState extends State<Login1Widget> {
           FFAppState().deviceid = _model.deviceid ?? FFAppState().deviceid;
           FFAppState().isLoggedIn = true;
           FFAppState().isRegistered = true;
+          // Save encrypted PIN for seamless biometric payments
+          try {
+            final encPin = await actions.encryptpass(password);
+            await _storage.write(key: 'sp_user_pin', value: encPin);
+          } catch (_) {}
           await _clearLockoutState();
           safeSetState(() {});
 
@@ -291,8 +300,13 @@ class _Login1WidgetState extends State<Login1Widget> {
             FFAppState().sessionid =
                 IspincodevalidCall.sessionid(_model.pincodevalid?.jsonBody ?? '') ?? '';
             FFAppState().biometric = false;
-            FFAppState().avalbal =
-                IspincodevalidCall.accountbalanace(_model.pincodevalid?.jsonBody ?? '') ?? '';
+            final bal = IspincodevalidCall.accountbalanace(
+                _model.pincodevalid?.jsonBody ?? '');
+            if (bal != null && bal.isNotEmpty) {
+              FFAppState().avalbal = bal;
+            } else if (FFAppState().avalbal.isEmpty) {
+              FFAppState().avalbal = '0.00';
+            }
             FFAppState().password = password;
             FFAppState().deviceid = _model.deviceid ?? FFAppState().deviceid;
             await _clearLockoutState();
@@ -500,7 +514,9 @@ class _Login1WidgetState extends State<Login1Widget> {
                             ),
                           ),
                         ],
-                      ),
+                      ).animate()
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: -0.2, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
 
                       const SizedBox(height: 24.0),
 
@@ -514,7 +530,9 @@ class _Login1WidgetState extends State<Login1Widget> {
                           letterSpacing: -0.8,
                           height: 1.18,
                         ),
-                      ),
+                      ).animate(delay: 100.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.15, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
                       const SizedBox(height: 10.0),
                       Text(
                         'Your 9PSB StreetPay wallet, bills and payouts in one place.',
@@ -524,7 +542,9 @@ class _Login1WidgetState extends State<Login1Widget> {
                           color: const Color(0xFF8FA596),
                           height: 1.45,
                         ),
-                      ),
+                      ).animate(delay: 150.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.15, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
 
                       const SizedBox(height: 32.0),
 
@@ -668,7 +688,10 @@ class _Login1WidgetState extends State<Login1Widget> {
                             ),
                           ],
                         ),
-                      ),
+                      ).animate(delay: 200.ms)
+                       .fadeIn(duration: 500.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.25, end: 0, duration: 550.ms, curve: Curves.easeOutBack)
+                       .scale(begin: const Offset(0.96, 0.96), end: const Offset(1.0, 1.0), duration: 550.ms, curve: Curves.easeOutBack),
 
                       const SizedBox(height: 24.0),
 
@@ -690,7 +713,10 @@ class _Login1WidgetState extends State<Login1Widget> {
                           elevation: 0.0,
                           borderRadius: BorderRadius.circular(16.0),
                         ),
-                      ),
+                      ).animate(delay: 280.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.2, end: 0, duration: 450.ms, curve: Curves.easeOutBack)
+                       .scale(begin: const Offset(0.95, 0.95), end: const Offset(1.0, 1.0), duration: 450.ms, curve: Curves.easeOutBack),
 
                       const SizedBox(height: 16.0),
 
@@ -706,7 +732,9 @@ class _Login1WidgetState extends State<Login1Widget> {
                             ),
                           ),
                         ),
-                      ),
+                      ).animate(delay: 350.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.1, end: 0, duration: 400.ms, curve: Curves.easeOut),
 
                       const SizedBox(height: 20.0),
 
@@ -737,7 +765,9 @@ class _Login1WidgetState extends State<Login1Widget> {
                             ),
                           ),
                         ),
-                      ),
+                      ).animate(delay: 400.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.1, end: 0, duration: 400.ms, curve: Curves.easeOut),
                       const SizedBox(height: 20.0),
 
                       // Direct Live Chat Link
@@ -779,7 +809,9 @@ class _Login1WidgetState extends State<Login1Widget> {
                             ),
                           ),
                         ),
-                      ),
+                      ).animate(delay: 450.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.1, end: 0, duration: 400.ms, curve: Curves.easeOut),
                       const SizedBox(height: 24.0),
                     ],
                   ),

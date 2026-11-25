@@ -346,7 +346,17 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: BatchsingleWidget.routeName,
           path: BatchsingleWidget.routePath,
-          builder: (context, params) => BatchsingleWidget(),
+          builder: (context, params) => BatchsingleWidget(
+            batchId: params.getParam(
+              'batchId',
+              ParamType.String,
+            ),
+          ),
+        ),
+        FFRoute(
+          name: ScheduledPaymentsWidget.routeName,
+          path: ScheduledPaymentsWidget.routePath,
+          builder: (context, params) => ScheduledPaymentsWidget(),
         ),
         FFRoute(
           name: AirtimeformWidget.routeName,

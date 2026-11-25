@@ -1,5 +1,6 @@
 import '/backend/api_requests/api_calls.dart';
 import '/services/tts_service.dart';
+import '/services/scheduled_payment_service.dart';
 import '/components/autodiscover_widget.dart';
 import '/components/biometriccomp_widget.dart';
 import '/components/bottom_app_bar/bottom_app_bar_widget.dart';
@@ -10,12 +11,12 @@ import '/services/clipboard_detection_service.dart';
 import '/services/cache_service.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/instant_timer.dart';
-import '/custom_code/actions/index.dart' as actions;
 import '/flutter_flow/custom_functions.dart' as functions;
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:webviewx_plus/webviewx_plus.dart';
@@ -130,6 +131,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
   }
 
   Future<void> _loadHomeData({required bool forceRefresh}) async {
+    ScheduledPaymentService.refreshReservedBalance();
     if (forceRefresh) {
       CacheService.invalidate(_cacheKeyBalance);
       CacheService.invalidate(_cacheKeyHistory);
@@ -139,7 +141,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
     // Balance — 2 min cache
     final cachedBalance = CacheService.get<String>(_cacheKeyBalance,
         maxAge: const Duration(minutes: 2));
-    if (cachedBalance != null) {
+    if (cachedBalance != null && FFAppState.isValidBalance(cachedBalance)) {
       FFAppState().avalbal = cachedBalance;
       safeSetState(() {});
     } else {
@@ -150,8 +152,9 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
       final balanceVal =
           GetaccountbalanceCall.avalbal(_model.getbalance?.jsonBody ?? '');
       if (balanceVal != null) {
-        FFAppState().avalbal = balanceVal.toString();
-        CacheService.set(_cacheKeyBalance, balanceVal.toString());
+        final balStr = balanceVal.toString();
+        FFAppState().avalbal = balStr;
+        CacheService.set(_cacheKeyBalance, balStr);
       }
       final tierVal =
           GetaccountbalanceCall.tier(_model.getbalance?.jsonBody ?? '');
@@ -215,6 +218,29 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
           final list = historyData.toList().cast<dynamic>();
           FFAppState().transactionhistory = list;
           CacheService.set(_cacheKeyHistory, list);
+
+          // StreetBox: Announce newly received payment when refreshed
+          if (forceRefresh &&
+              FFAppState().voiceAnnouncementsActivated &&
+              list.isNotEmpty) {
+            final topTx = list.first;
+            final credit =
+                getJsonField(topTx, r'''$.credit''')?.toString() ?? '';
+            if (credit.isNotEmpty &&
+                credit != '0' &&
+                credit != '0.0' &&
+                credit != 'null') {
+              final narration =
+                  getJsonField(topTx, r'''$.narration''')?.toString() ??
+                      'Customer';
+              final sender =
+                  functions.processTransactionNarration(narration);
+              TtsService.instance.announcePaymentReceipt(
+                amount: credit,
+                senderName: sender,
+              );
+            }
+          }
         }
         safeSetState(() {});
       }
@@ -223,6 +249,23 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
 
   Future<void> _refreshData() async {
     await _loadHomeData(forceRefresh: true);
+    if (mounted &&
+        _model.getbalance != null &&
+        GetaccountbalanceCall.avalbal(_model.getbalance?.jsonBody ?? '') == null &&
+        _model.getbalance?.succeeded == false) {
+      final msg = _model.getbalance?.responseMessage.isNotEmpty == true
+          ? _model.getbalance?.responseMessage
+          : 'Could not refresh wallet balance. Using saved balance.';
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg ?? 'Could not refresh wallet balance.'),
+          backgroundColor: const Color(0xFF1E3A2F),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   Future<void> _showUpgradeStatus() async {
@@ -456,6 +499,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
     Color? iconColor,
     required String label,
     required VoidCallback onTap,
+    int index = 0,
   }) {
     return Expanded(
       child: Material(
@@ -512,7 +556,14 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
             ),
           ),
         ),
-      ),
+      ).animate(delay: (200 + index * 35).ms)
+       .fadeIn(duration: 350.ms, curve: Curves.easeOut)
+       .scale(
+         begin: const Offset(0.88, 0.88),
+         end: const Offset(1.0, 1.0),
+         duration: 400.ms,
+         curve: Curves.easeOutBack,
+       ),
     );
   }
 
@@ -524,6 +575,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
     required bool isCredit,
     required bool isPending,
     VoidCallback? onTap,
+    int index = 0,
   }) {
     return Material(
       color: Colors.transparent,
@@ -620,7 +672,9 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                           fontWeight: FontWeight.w700,
                           color: isPending
                               ? const Color(0xFFC97A12)
-                              : const Color(0xFF2F8F3C),
+                              : (status.toLowerCase().contains('rev')
+                                  ? const Color(0xFFD97706)
+                                  : const Color(0xFF2F8F3C)),
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -634,7 +688,9 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
           ),
         ),
       ),
-    );
+    ).animate(delay: (260 + index * 35).ms)
+     .fadeIn(duration: 350.ms, curve: Curves.easeOut)
+     .slideX(begin: 0.05, end: 0, duration: 350.ms, curve: Curves.easeOutCubic);
   }
 
   String _formatAmount(num value) {
@@ -769,8 +825,26 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
     final accountNo = FFAppState().accountno.isNotEmpty
         ? FFAppState().accountno
         : '──────────';
-    final rawBalance =
-        FFAppState().avalbal.isNotEmpty ? FFAppState().avalbal : '0.00';
+    final double availBalanceNum = FFAppState().effectiveAvailableBalance;
+    final double ledgerBalanceNum = FFAppState().ledgerBalance;
+    final double reservedBalanceNum = FFAppState().reservedBalance;
+    final int pendingSchedulesCount = FFAppState().pendingScheduleCount;
+
+    final displayAvailable = formatNumber(
+      availBalanceNum,
+      formatType: FormatType.decimal,
+      decimalType: DecimalType.periodDecimal,
+    );
+    final displayLedger = formatNumber(
+      ledgerBalanceNum,
+      formatType: FormatType.decimal,
+      decimalType: DecimalType.periodDecimal,
+    );
+    final displayReserved = formatNumber(
+      reservedBalanceNum,
+      formatType: FormatType.decimal,
+      decimalType: DecimalType.periodDecimal,
+    );
     final tier = FFAppState().tier.isNotEmpty ? FFAppState().tier : '1';
     final tierNum = int.tryParse(tier) ?? 1;
     final userInitials = _getUserInitials(userName);
@@ -800,19 +874,36 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 1. Top Curved Forest Green Header
-                      Container(
-                        width: double.infinity,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0B2018),
-                          borderRadius: BorderRadius.only(
-                            bottomLeft: Radius.circular(26.0),
-                            bottomRight: Radius.circular(26.0),
+                      // 1 & 2. Top Curved Forest Green Header with Floating Wallet Balance Card
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          // Curved Forest Green Background behind user bar and top half of balance card
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 60.0,
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF0B2018),
+                                borderRadius: BorderRadius.only(
+                                  bottomLeft: Radius.circular(26.0),
+                                  bottomRight: Radius.circular(26.0),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                        padding:
-                            const EdgeInsets.fromLTRB(20.0, 54.0, 20.0, 80.0),
-                        child: Row(
+                          // Content in natural layout flow
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Top Header Row
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(0.0, 54.0, 0.0, 16.0),
+                                  child: Row(
                           children: [
                             Container(
                               width: 40.0,
@@ -858,6 +949,82 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                             ),
                             Row(
                               children: [
+                                // StreetBox Audio Soundbox Toggle
+                                GestureDetector(
+                                  onTap: () {
+                                    HapticFeedback.mediumImpact();
+                                    final isCurrentlyActive =
+                                        FFAppState().voiceAnnouncementsActivated;
+                                    final newState = !isCurrentlyActive;
+                                    safeSetState(() {
+                                      FFAppState().voiceAnnouncementsActivated =
+                                          newState;
+                                    });
+                                    if (newState) {
+                                      TtsService.instance.testSoundbox();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '🔊 StreetBox Active! Incoming payments will be announced loudly.',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          backgroundColor:
+                                              const Color(0xFF1E3A2F),
+                                          behavior: SnackBarBehavior.floating,
+                                          duration: const Duration(seconds: 3),
+                                        ),
+                                      );
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'StreetBox audio muted.',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          backgroundColor: Colors.black87,
+                                          behavior: SnackBarBehavior.floating,
+                                          duration: const Duration(seconds: 2),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: Container(
+                                    width: 36.0,
+                                    height: 36.0,
+                                    decoration: BoxDecoration(
+                                      color: FFAppState()
+                                              .voiceAnnouncementsActivated
+                                          ? const Color(0xFF56B84B)
+                                              .withValues(alpha: 0.25)
+                                          : const Color(0xFF152F23),
+                                      shape: BoxShape.circle,
+                                      border: FFAppState()
+                                              .voiceAnnouncementsActivated
+                                          ? Border.all(
+                                              color: const Color(0xFF56B84B),
+                                              width: 1.5)
+                                          : null,
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      FFAppState().voiceAnnouncementsActivated
+                                          ? Icons.volume_up_rounded
+                                          : Icons.volume_off_outlined,
+                                      color: FFAppState()
+                                              .voiceAnnouncementsActivated
+                                          ? const Color(0xFF7FD472)
+                                          : const Color(0xFFCFE3D6),
+                                      size: 19.0,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8.0),
                                 GestureDetector(
                                   onTap: () {
                                     context.pushNamed(
@@ -904,14 +1071,8 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                           ],
                         ),
                       ),
-
-                      // 2. Floating Wallet Balance Card
-                      Transform.translate(
-                        offset: const Offset(0.0, -56.0),
-                        child: Padding(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 20.0),
-                          child: Container(
+                      // Floating Wallet Balance Card
+                      Container(
                             width: double.infinity,
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -942,7 +1103,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                 Row(
                                   children: [
                                     Text(
-                                      'WALLET BALANCE',
+                                      'AVAILABLE BALANCE',
                                       style: GoogleFonts.plusJakartaSans(
                                         fontSize: 11.0,
                                         fontWeight: FontWeight.w800,
@@ -962,24 +1123,32 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                         },
                                         borderRadius: BorderRadius.circular(20.0),
                                         child: Padding(
-                                          padding: const EdgeInsets.all(8.0),
+                                          padding: const EdgeInsets.all(10.0),
                                           child: Icon(
                                             _showBalance
                                                 ? Icons.visibility_outlined
                                                 : Icons.visibility_off_outlined,
                                             color: const Color(0xFF8FB3A0),
-                                            size: 20.0,
+                                            size: 22.0,
                                           ),
                                         ),
                                       ),
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 8.0),
-                                Text(
-                                  _showBalance
-                                      ? '₦$rawBalance'
-                                      : '₦ ••••••',
+                                const SizedBox(height: 6.0),
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    safeSetState(() {
+                                      FFAppState().show = !_showBalance;
+                                    });
+                                  },
+                                  child: Text(
+                                    _showBalance
+                                        ? '₦$displayAvailable'
+                                        : '₦ ••••••',
                                   style: GoogleFonts.plusJakartaSans(
                                     fontSize: 32.0,
                                     fontWeight: FontWeight.w800,
@@ -987,6 +1156,218 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                     letterSpacing: -1.0,
                                   ),
                                 ),
+                                ),
+                                const SizedBox(height: 8.0),
+                                if (_showBalance) ...[
+                                  if (reservedBalanceNum > 0)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4.0, bottom: 6.0),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () {
+                                            HapticFeedback.lightImpact();
+                                            context.pushNamed(ScheduledPaymentsWidget.routeName);
+                                          },
+                                          borderRadius: BorderRadius.circular(16.0),
+                                          child: Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  Colors.white.withValues(alpha: 0.10),
+                                                  Colors.white.withValues(alpha: 0.04),
+                                                ],
+                                              ),
+                                              borderRadius: BorderRadius.circular(16.0),
+                                              border: Border.all(
+                                                color: Colors.white.withValues(alpha: 0.14),
+                                                width: 1.0,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withValues(alpha: 0.12),
+                                                  blurRadius: 10.0,
+                                                  offset: const Offset(0.0, 4.0),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                // Left Column: Total Ledger
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Row(
+                                                        children: [
+                                                          Container(
+                                                            width: 6.0,
+                                                            height: 6.0,
+                                                            decoration: const BoxDecoration(
+                                                              color: Color(0xFF8FB3A0),
+                                                              shape: BoxShape.circle,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(width: 5.0),
+                                                          Text(
+                                                            'TOTAL LEDGER',
+                                                            style: GoogleFonts.plusJakartaSans(
+                                                              fontSize: 9.5,
+                                                              fontWeight: FontWeight.w700,
+                                                              color: const Color(0xFF8FB3A0),
+                                                              letterSpacing: 0.7,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(height: 3.0),
+                                                      Text(
+                                                        '₦$displayLedger',
+                                                        style: GoogleFonts.plusJakartaSans(
+                                                          fontSize: 14.5,
+                                                          fontWeight: FontWeight.w800,
+                                                          color: Colors.white,
+                                                          letterSpacing: -0.3,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                // Frosted Vertical Divider
+                                                Container(
+                                                  width: 1.0,
+                                                  height: 28.0,
+                                                  color: Colors.white.withValues(alpha: 0.16),
+                                                ),
+                                                const SizedBox(width: 14.0),
+                                                // Right Column: On Hold (Pending Schedules)
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Row(
+                                                        children: [
+                                                          const Icon(
+                                                            Icons.lock_clock_rounded,
+                                                            size: 11.5,
+                                                            color: Color(0xFF7FD472),
+                                                          ),
+                                                          const SizedBox(width: 4.0),
+                                                          Text(
+                                                            'ON HOLD ($pendingSchedulesCount)',
+                                                            style: GoogleFonts.plusJakartaSans(
+                                                              fontSize: 9.5,
+                                                              fontWeight: FontWeight.w800,
+                                                              color: const Color(0xFF7FD472),
+                                                              letterSpacing: 0.7,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(height: 3.0),
+                                                      Row(
+                                                        children: [
+                                                          Text(
+                                                            '₦$displayReserved',
+                                                            style: GoogleFonts.plusJakartaSans(
+                                                              fontSize: 14.5,
+                                                              fontWeight: FontWeight.w800,
+                                                              color: const Color(0xFFD6F5D0),
+                                                              letterSpacing: -0.3,
+                                                            ),
+                                                          ),
+                                                          const Spacer(),
+                                                          const Icon(
+                                                            Icons.arrow_forward_ios_rounded,
+                                                            size: 10.0,
+                                                            color: Color(0xFF7FD472),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4.0, bottom: 2.0),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.06),
+                                          borderRadius: BorderRadius.circular(20.0),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(alpha: 0.10),
+                                            width: 0.8,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.account_balance_wallet_outlined,
+                                              size: 12.0,
+                                              color: Color(0xFF8FB3A0),
+                                            ),
+                                            const SizedBox(width: 6.0),
+                                            Text(
+                                              'Ledger Balance: ₦$displayLedger',
+                                              style: GoogleFonts.plusJakartaSans(
+                                                fontSize: 11.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: const Color(0xFF8FB3A0),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                ] else ...[
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4.0, bottom: 2.0),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.06),
+                                        borderRadius: BorderRadius.circular(20.0),
+                                        border: Border.all(
+                                          color: Colors.white.withValues(alpha: 0.10),
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.lock_outline_rounded,
+                                            size: 12.0,
+                                            color: Color(0xFF8FB3A0),
+                                          ),
+                                          const SizedBox(width: 6.0),
+                                          Text(
+                                            'Balance hidden · Tap eye to reveal',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              fontSize: 11.0,
+                                              fontWeight: FontWeight.w600,
+                                              color: const Color(0xFF8FB3A0),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 8.0),
                                 Row(
                                   children: [
@@ -1130,13 +1511,17 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                               ],
                             ),
                           ),
-                        ),
+                        ],
                       ),
+                    ),
+                  ],
+                ).animate()
+                 .fadeIn(duration: 450.ms, curve: Curves.easeOut),
+
+                      const SizedBox(height: 16.0),
 
                       // 3. Discover Nearby Card
-                      Transform.translate(
-                        offset: const Offset(0.0, -40.0),
-                        child: Padding(
+                      Padding(
                           padding:
                               const EdgeInsets.symmetric(horizontal: 20.0),
                           child: Material(
@@ -1217,13 +1602,14 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                        ).animate(delay: 150.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.15, end: 0, duration: 500.ms, curve: Curves.easeOutBack),
+
+                      const SizedBox(height: 18.0),
 
                       // 4. Quick Services Grid
-                      Transform.translate(
-                        offset: const Offset(0.0, -28.0),
-                        child: Padding(
+                      Padding(
                           padding:
                               const EdgeInsets.symmetric(horizontal: 20.0),
                           child: Column(
@@ -1236,18 +1622,22 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                   fontWeight: FontWeight.w800,
                                   color: const Color(0xFF101614),
                                 ),
-                              ),
+                              ).animate(delay: 180.ms)
+                               .fadeIn(duration: 350.ms)
+                               .slideX(begin: -0.05, end: 0, duration: 350.ms, curve: Curves.easeOut),
                               const SizedBox(height: 14.0),
                               // Row 1: Transfer actions (OPay-style)
                               Row(
                                 children: [
                                   _buildServiceItem(
+                                    index: 0,
                                     icon: Icons.people_rounded,
                                     iconColor: const Color(0xFF2F8F3C),
                                     label: 'To StreetPay',
                                     onTap: _openStreetPaySheet,
                                   ),
                                   _buildServiceItem(
+                                    index: 1,
                                     icon: Icons.account_balance_rounded,
                                     iconColor: const Color(0xFF3D5FA0),
                                     label: 'To Bank',
@@ -1255,6 +1645,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                         ManualPaymentWidget.routeName),
                                   ),
                                   _buildServiceItem(
+                                    index: 2,
                                     icon: Icons.phone_android_rounded,
                                     iconColor: const Color(0xFF2557B5),
                                     label: 'Airtime',
@@ -1262,6 +1653,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                         .pushNamed(AirtimeformWidget.routeName),
                                   ),
                                   _buildServiceItem(
+                                    index: 3,
                                     icon: Icons.data_usage_rounded,
                                     iconColor: const Color(0xFF0284C7),
                                     label: 'Data',
@@ -1282,6 +1674,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                               Row(
                                 children: [
                                   _buildServiceItem(
+                                    index: 4,
                                     icon: Icons.bolt_rounded,
                                     iconColor: const Color(0xFFD97706),
                                     label: 'Electricity',
@@ -1296,6 +1689,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                     ),
                                   ),
                                   _buildServiceItem(
+                                    index: 5,
                                     icon: Icons.tv_rounded,
                                     iconColor: const Color(0xFF7C3AED),
                                     label: 'Cable TV',
@@ -1310,6 +1704,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                     ),
                                   ),
                                   _buildServiceItem(
+                                    index: 6,
                                     icon: Icons.wifi_rounded,
                                     iconColor: const Color(0xFF0D9488),
                                     label: 'Internet',
@@ -1324,6 +1719,7 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                     ),
                                   ),
                                   _buildServiceItem(
+                                    index: 7,
                                     icon: Icons.sports_soccer_rounded,
                                     iconColor: const Color(0xFFEA580C),
                                     label: 'Betting',
@@ -1342,12 +1738,11 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                             ],
                           ),
                         ),
-                      ),
+
+                      const SizedBox(height: 18.0),
 
                       // 5. Bill Requests Banner
-                      Transform.translate(
-                        offset: const Offset(0.0, -14.0),
-                        child: Padding(
+                      Padding(
                           padding:
                               const EdgeInsets.symmetric(horizontal: 20.0),
                           child: Material(
@@ -1445,13 +1840,14 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                        ).animate(delay: 360.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.14, end: 0, duration: 500.ms, curve: Curves.easeOutBack),
+
+                      const SizedBox(height: 16.0),
 
                       // 5b. Smart Discovery Show promo card
-                      Transform.translate(
-                        offset: const Offset(0.0, -10.0),
-                        child: Padding(
+                      Padding(
                           padding: const EdgeInsets.fromLTRB(20.0, 0, 20.0, 10.0),
                           child: Material(
                             color: Colors.transparent,
@@ -1557,13 +1953,14 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                        ).animate(delay: 420.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.14, end: 0, duration: 500.ms, curve: Curves.easeOutBack),
+
+                      const SizedBox(height: 16.0),
 
                       // 6. Tier Progress Card (with upgrade status CTA)
-                      Transform.translate(
-                        offset: const Offset(0.0, -4.0),
-                        child: Padding(
+                      Padding(
                           padding:
                               const EdgeInsets.symmetric(horizontal: 20.0),
                           child: Material(
@@ -1717,8 +2114,9 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                        ).animate(delay: 480.ms)
+                       .fadeIn(duration: 450.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.14, end: 0, duration: 500.ms, curve: Curves.easeOutBack),
 
                       // 7. Recent Activity Section
                       Padding(
@@ -1804,7 +2202,9 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                 }
                                 final displayTx = allTx.take(5).toList();
                                 return Column(
-                                  children: displayTx.map((txItem) {
+                                  children: displayTx.asMap().entries.map((entry) {
+                                    final index = entry.key;
+                                    final txItem = entry.value;
                                     final narration = getJsonField(
                                           txItem,
                                           r'''$.narration''',
@@ -1843,13 +2243,22 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                                           ? '+₦$amountRaw'
                                           : '−₦$amountRaw';
                                     }
+                                    final isReversed = getJsonField(txItem, r'''$.isReversed''') == true;
+                                    final postingType = getJsonField(txItem, r'''$.postingType''')?.toString();
+                                    final txStatus = isReversed
+                                        ? 'Reversed'
+                                        : (postingType == 'ReversalPosting'
+                                            ? 'Refunded'
+                                            : 'Successful');
+
                                     return _buildRecentActivityItem(
+                                      index: index,
                                       title: functions
                                           .processTransactionNarration(
                                               narration),
                                       subtitle: dateStr,
                                       amount: amount,
-                                      status: 'Successful',
+                                      status: txStatus,
                                       isCredit: isCredit,
                                       isPending: false,
                                       onTap: () => context.pushNamed(
@@ -1868,7 +2277,9 @@ class _NewhomeWidgetState extends State<NewhomeWidget>
                             ),
                           ],
                         ),
-                      ),
+                      ).animate(delay: 540.ms)
+                       .fadeIn(duration: 400.ms, curve: Curves.easeOut)
+                       .slideY(begin: 0.1, end: 0, duration: 450.ms, curve: Curves.easeOutCubic),
                     ],
                   ),
                 ),

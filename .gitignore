@@ -38,3 +38,9 @@ screen2.png
 current_screen.png
 brag-landscape/
 brag-vertical/
+
+# Temporary workspace & recordings
+ff-workspace/
+ref_video.mp4
+device_screen*.png
+screen_*.png

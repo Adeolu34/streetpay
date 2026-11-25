@@ -27,6 +27,10 @@ workflows:
           cd ios
           pod install
           cd ..
+      - name: Generate App Store Screenshots
+        script: |
+          pip3 install pillow || true
+          python3 ../scripts/generate_screenshots.py || true
       - name: Flutter build ipa
         script: |
           flutter build ipa --release \
@@ -35,8 +39,27 @@ workflows:
       - build/ios/ipa/*.ipa
       - streetpay/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - ../screenshots/**/*.png
+      - screenshots/**/*.png
+
     publishing:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
 
+  generate-screenshots:
+    name: Generate App Store Screenshots
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    working_directory: streetpay
+    environment:
+      flutter: 3.41.9
+      xcode: latest
+    scripts:
+      - name: Install Python dependencies
+        script: pip3 install pillow
+      - name: Generate App Store Screenshots
+        script: python3 ../scripts/generate_screenshots.py
+    artifacts:
+      - ../screenshots/**/*.png
+      - screenshots/**/*.png

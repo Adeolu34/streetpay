@@ -3,11 +3,17 @@ import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
 import '/flutter_flow/custom_functions.dart' as functions;
 import '/custom_code/actions/index.dart' as actions;
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:local_auth/local_auth.dart';
+import '/services/tts_service.dart';
+import '/services/beneficiary_service.dart';
+import '/services/local_vault_service.dart';
+import '/services/payment_guard_service.dart';
 import 'transerconfirm_model.dart';
 export 'transerconfirm_model.dart';
 
@@ -65,17 +71,32 @@ class _TranserconfirmWidgetState extends State<TranserconfirmWidget> {
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       try {
         _model.streetauth = await StreetauthCall.call();
+        final token = StreetauthCall.streettoken(
+          (_model.streetauth?.jsonBody ?? ''),
+        );
+        if (token != null && token.isNotEmpty) {
+          FFAppState().bsptoken = token;
+        }
+
+        // Proactively refresh live wallet balance
+        if (FFAppState().phonenumber.isNotEmpty) {
+          final balRes = await GetaccountbalanceCall.call(
+            phone: FFAppState().phonenumber,
+            accessToken: token ?? FFAppState().bsptoken,
+          );
+          final balVal = GetaccountbalanceCall.avalbal(balRes.jsonBody);
+          if (balVal != null) {
+            FFAppState().avalbal = balVal.toString();
+          }
+        }
+
         _model.receiverphone = await GetphonenCall.call(
           accountNo: widget.receiveraccount,
-          accessToken: StreetauthCall.streettoken(
-            (_model.streetauth?.jsonBody ?? ''),
-          ),
+          accessToken: token ?? FFAppState().bsptoken,
         );
         _model.pinnedlist = await GetpinnedphonesCall.call(
           hostphone: FFAppState().phonenumber,
-          accessToken: StreetauthCall.streettoken(
-            (_model.streetauth?.jsonBody ?? ''),
-          ),
+          accessToken: token ?? FFAppState().bsptoken,
         );
         safeSetState(() {});
       } catch (_) {}
@@ -145,237 +166,81 @@ class _TranserconfirmWidgetState extends State<TranserconfirmWidget> {
   }
 
   Future<void> _submitPayment({bool viaFingerprint = false}) async {
+    if (_isProcessing) return;
+
+    // 1. Guard against duplicate payment (same account & same amount within 30s)
+    final parsedAmount = functions.stringtodouble(widget.amount);
+    String cleanReceiverAccount =
+        (widget.receiveraccount ?? '').replaceAll(RegExp(r'\D'), '');
+    if (cleanReceiverAccount.length == 13 && cleanReceiverAccount.startsWith('234')) {
+      cleanReceiverAccount = cleanReceiverAccount.substring(3);
+    }
+    if (cleanReceiverAccount.length == 11 && cleanReceiverAccount.startsWith('0')) {
+      cleanReceiverAccount = cleanReceiverAccount.substring(1);
+    }
+
+    final remainingCooldown = PaymentGuardService.getRemainingCooldown(
+      accountNumber: cleanReceiverAccount,
+      amount: parsedAmount,
+    );
+    if (remainingCooldown > 0) {
+      PaymentGuardService.showDuplicateWarningDialog(
+        context: context,
+        recipientName: widget.recipient ?? 'recipient',
+        accountNumber: cleanReceiverAccount,
+        amount: parsedAmount,
+        remainingSeconds: remainingCooldown,
+      );
+      return;
+    }
+
+    // 2. Global in-flight lock to prevent duplicate concurrent submissions
+    if (!PaymentGuardService.acquireLock()) {
+      setState(() {
+        _isProcessing = false;
+        _pin = '';
+        _errorMessage = 'A transaction is currently processing. Please wait.';
+      });
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
       _errorMessage = null;
     });
 
     try {
-      bool pinValid = false;
-
-      if (viaFingerprint) {
-        pinValid = true;
-      } else {
-        final pincodeRes = await IspincodevalidCall.call(
-          phoneno: functions.removecode(FFAppState().phonenumber),
-          pincode: _pin,
-          accessToken: FFAppState().bsptoken,
-          deviceid: FFAppState().deviceid,
-        );
-
-        final session = IspincodevalidCall.sessionid(
-          pincodeRes.jsonBody,
-        );
-        if (session != null) {
-          FFAppState().sessionid = session;
-        }
-
-        pinValid = IspincodevalidCall.success(pincodeRes.jsonBody) == true;
-      }
-
-      if (pinValid) {
-        final parsedAmount = functions.stringtodouble(widget.amount);
-        if (parsedAmount <= 0.0) {
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _pin = '';
-              _errorMessage = 'Invalid transfer amount.';
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Please enter a valid transfer amount greater than ₦0'),
-                backgroundColor: Color(0xFFD32F2F),
-              ),
-            );
-          }
-          return;
-        }
-
-        // Clean account number to strictly 10 digits
-        String cleanReceiverAccount =
-            (widget.receiveraccount ?? '').replaceAll(RegExp(r'\D'), '');
-        if (cleanReceiverAccount.length == 11 &&
-            cleanReceiverAccount.startsWith('0')) {
-          cleanReceiverAccount = cleanReceiverAccount.substring(1);
-        }
-        if (cleanReceiverAccount.length != 10) {
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _pin = '';
-              _errorMessage =
-                  'Recipient account number must be exactly 10 digits.';
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content:
-                    Text('Recipient account number must be exactly 10 digits.'),
-                backgroundColor: Color(0xFFD32F2F),
-              ),
-            );
-          }
-          return;
-        }
-
-        // Map StreetPay / 9PSB bank code properly
-        String cleanBankCode = (widget.bankcode ?? '').trim();
-        if (cleanBankCode.isEmpty ||
-            cleanBankCode.toLowerCase().contains('streetpay') ||
-            cleanBankCode == '000000' ||
-            !RegExp(r'^\d{3,6}$').hasMatch(cleanBankCode)) {
-          cleanBankCode = '120001';
-        }
-
-        // Check wallet balance against amount + EMTL stamp duty (₦50 on transfers >= ₦10,000) + transfer fee
-        final double userBal = functions.stringtodouble(FFAppState().avalbal);
-        final double stampDuty = parsedAmount >= 10000.0 ? 50.0 : 0.0;
-        final double fee = functions.stringtodouble(widget.transferfee);
-        final double totalNeeded = parsedAmount + stampDuty + fee;
-        if (userBal < totalNeeded) {
-          final errMsg = stampDuty > 0
-              ? 'Insufficient balance: ₦${formatNumber(totalNeeded, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)} required (including ₦50 EMTL stamp duty on transfers ≥ ₦10,000).'
-              : 'Insufficient wallet balance to cover transfer amount and fee.';
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _pin = '';
-              _errorMessage = errMsg;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(errMsg),
-                backgroundColor: const Color(0xFFD32F2F),
-              ),
-            );
-          }
-          return;
-        }
-
-        // Generate a fresh unique transaction reference on every submission attempt
-        final currentTransRef = await actions.generatetransref();
-
-        // Ensure valid bearer access token from Streetauth
-        String tokenToUse = FFAppState().bsptoken;
-        if (tokenToUse.isEmpty) {
-          final authRes = await StreetauthCall.call(forceRefresh: true);
-          final fresh = StreetauthCall.streettoken(authRes.jsonBody);
-          if (fresh != null && fresh.isNotEmpty) {
-            tokenToUse = fresh;
-            FFAppState().bsptoken = fresh;
-          }
-        }
-
-        // Use verified server session ID from PIN verification
-        final sessionToUse = FFAppState().sessionid.isNotEmpty
-            ? FFAppState().sessionid
-            : (widget.sessionid ?? await actions.generateseesionid());
-
-        final transtokenRes = await GettransactiontokenCall.call(
-          accessToken: tokenToUse,
-          accountno: FFAppState().accountno,
-          deviceid: FFAppState().deviceid,
-          sessionid: sessionToUse,
-        );
-
-        final othertransRes = await WalletAsAServiceGroup.otherBankTransferCall.call(
-          customeraccount: cleanBankCode,
-          customername: widget.recipient,
-          customeraccountno: cleanReceiverAccount,
-          senderaccountno: FFAppState().accountno,
-          sendername: FFAppState().accountname,
-          narration: '${widget.recipient}',
-          amount: parsedAmount.toString(),
-          description: valueOrDefault<String>(widget.description, '-'),
-          refrence: currentTransRef,
-          sectionid: sessionToUse,
-          authToken: tokenToUse,
-          refid: GettransactiontokenCall.transtoken(
-            transtokenRes.jsonBody,
+      await _executeTransferPipeline(viaFingerprint: viaFingerprint)
+          .timeout(const Duration(seconds: 35));
+    } on TimeoutException {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _pin = '';
+          _errorMessage =
+              'Transaction timed out. Please check your transaction history before retrying.';
+        });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Transaction timed out. Please check your transaction history.',
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Color(0xFFD32F2F),
+            duration: Duration(seconds: 5),
           ),
         );
-
-        if (WalletAsAServiceGroup.otherBankTransferCall
-                .success(othertransRes.jsonBody) ==
-            true) {
-          if (mounted) {
-            Navigator.pop(context, true);
-          }
-        } else {
-          final errorMsg = WalletAsAServiceGroup.otherBankTransferCall
-                  .message(othertransRes.jsonBody) ??
-              'Transaction failed. Please try again.';
-
-          try {
-            await LogtransactionCall.call(
-              phoneno: FFAppState().phonenumber,
-              accountId: FFAppState().accountno,
-              reqtype: 'Transfer--${widget.amount}',
-              sSid: sessionToUse,
-              passorfail: 'Failed',
-              balBefore: FFAppState().avalbal,
-              balafter: FFAppState().avalbal,
-              beneficiary: widget.recipient,
-              tammt: widget.amount,
-              extra: widget.description,
-              transREF: currentTransRef,
-              accessToken: FFAppState().bsptoken,
-              ttype: 'Debit',
-            );
-          } catch (_) {}
-
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _pin = '';
-              _errorMessage = errorMsg;
-            });
-            ScaffoldMessenger.of(context).clearSnackBars();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  errorMsg,
-                  style: const TextStyle(color: Colors.white),
-                ),
-                duration: const Duration(milliseconds: 4000),
-                backgroundColor: const Color(0xFFD32F2F),
-              ),
-            );
-          }
-        }
-      } else {
-        _failedPinAttempts++;
-        if (_failedPinAttempts >= _maxPinAttempts) {
-          _pinLockUntil = DateTime.now().add(_pinLockoutDuration);
-          _failedPinAttempts = 0;
-        }
-        if (mounted) {
-          final remaining = _maxPinAttempts - _failedPinAttempts;
-          final lockMsg = _isPinLocked
-              ? 'Too many wrong PINs. Try again in ${_pinLockUntil!.difference(DateTime.now()).inSeconds}s.'
-              : 'Invalid PIN. $remaining attempt${remaining == 1 ? '' : 's'} left.';
-          setState(() {
-            _isProcessing = false;
-            _pin = '';
-            _errorMessage = lockMsg;
-          });
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(lockMsg, style: const TextStyle(color: Colors.white)),
-              duration: const Duration(milliseconds: 3500),
-              backgroundColor: const Color(0xFFD32F2F),
-            ),
-          );
-        }
       }
     } catch (e) {
+      debugPrint('[TranserconfirmWidget] Payment error: $e');
       if (mounted) {
         setState(() {
           _isProcessing = false;
           _pin = '';
           _errorMessage = 'Error processing transfer. Please try again.';
         });
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -383,6 +248,304 @@ class _TranserconfirmWidgetState extends State<TranserconfirmWidget> {
               style: TextStyle(color: Colors.white),
             ),
             backgroundColor: Color(0xFFD32F2F),
+          ),
+        );
+      }
+    } finally {
+      PaymentGuardService.releaseLock();
+      if (mounted && _isProcessing) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  Future<void> _executeTransferPipeline({bool viaFingerprint = false}) async {
+    bool pinValid = false;
+    String pinToVerify = _pin;
+
+    if (viaFingerprint) {
+      // Retrieve encrypted user PIN from secure storage
+      const storage = FlutterSecureStorage();
+      final encPin = await storage.read(key: 'sp_user_pin');
+      if (encPin != null && encPin.isNotEmpty) {
+        pinToVerify = await actions.decryptpass(encPin);
+      }
+      if (pinToVerify.isEmpty || pinToVerify.length < 4) {
+        // No saved PIN yet on this device - prompt user to enter PIN once
+        if (mounted) {
+          setState(() {
+            _isProcessing = false;
+            _showPinView = true;
+            _errorMessage = 'Please enter your 5-digit PIN to enable fingerprint payments.';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please enter your 5-digit PIN to enable fingerprint payments.'),
+              backgroundColor: Color(0xFF2E7D32),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // Refresh token before PIN check
+    try {
+      final authRes = await StreetauthCall.call(forceRefresh: true);
+      final fresh = StreetauthCall.streettoken(authRes.jsonBody);
+      if (fresh != null && fresh.isNotEmpty) {
+        FFAppState().bsptoken = fresh;
+      }
+    } catch (_) {}
+
+    // Verify PIN with StreetPay server to obtain a verified server SessionID
+    final pincodeRes = await IspincodevalidCall.call(
+      phoneno: functions.removecode(FFAppState().phonenumber),
+      pincode: pinToVerify,
+      accessToken: FFAppState().bsptoken,
+      deviceid: FFAppState().deviceid,
+    );
+
+    final session = IspincodevalidCall.sessionid(pincodeRes.jsonBody);
+    if (session != null && session.isNotEmpty) {
+      FFAppState().sessionid = session;
+    }
+
+    pinValid = IspincodevalidCall.success(pincodeRes.jsonBody) == true;
+
+    if (!pinValid) {
+      if (viaFingerprint) {
+        // Stored PIN was rejected by server (e.g. PIN changed)
+        const storage = FlutterSecureStorage();
+        await storage.delete(key: 'sp_user_pin');
+        if (mounted) {
+          setState(() {
+            _isProcessing = false;
+            _showPinView = true;
+            _errorMessage = 'PIN mismatch. Please enter your 5-digit PIN.';
+          });
+        }
+        return;
+      }
+
+      _failedPinAttempts++;
+      if (_failedPinAttempts >= _maxPinAttempts) {
+        _pinLockUntil = DateTime.now().add(_pinLockoutDuration);
+        _failedPinAttempts = 0;
+      }
+      if (mounted) {
+        final remaining = _maxPinAttempts - _failedPinAttempts;
+        final lockMsg = _isPinLocked
+            ? 'Too many wrong PINs. Try again in ${_pinLockUntil!.difference(DateTime.now()).inSeconds}s.'
+            : 'Invalid PIN. $remaining attempt${remaining == 1 ? '' : 's'} left.';
+        setState(() {
+          _isProcessing = false;
+          _pin = '';
+          _errorMessage = lockMsg;
+        });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(lockMsg, style: const TextStyle(color: Colors.white)),
+            duration: const Duration(milliseconds: 3500),
+            backgroundColor: const Color(0xFFD32F2F),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Save PIN securely for future fingerprint transactions
+    try {
+      const storage = FlutterSecureStorage();
+      final enc = await actions.encryptpass(pinToVerify);
+      await storage.write(key: 'sp_user_pin', value: enc);
+    } catch (_) {}
+
+    final parsedAmount = functions.stringtodouble(widget.amount);
+    if (parsedAmount <= 0.0) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _pin = '';
+          _errorMessage = 'Invalid transfer amount.';
+        });
+      }
+      return;
+    }
+
+    // Clean account number to strictly 10 digits
+    String cleanReceiverAccount =
+        (widget.receiveraccount ?? '').replaceAll(RegExp(r'\D'), '');
+    if (cleanReceiverAccount.length == 13 && cleanReceiverAccount.startsWith('234')) {
+      cleanReceiverAccount = cleanReceiverAccount.substring(3);
+    }
+    if (cleanReceiverAccount.length == 11 && cleanReceiverAccount.startsWith('0')) {
+      cleanReceiverAccount = cleanReceiverAccount.substring(1);
+    }
+    if (cleanReceiverAccount.length != 10) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _pin = '';
+          _errorMessage = 'Recipient account number must be exactly 10 digits.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Recipient account number must be exactly 10 digits.'),
+            backgroundColor: Color(0xFFD32F2F),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Map bank code
+    String cleanBankCode = (widget.bankcode ?? '').trim();
+    if (cleanBankCode.isEmpty ||
+        cleanBankCode.toLowerCase().contains('streetpay') ||
+        cleanBankCode == '000000' ||
+        !RegExp(r'^\d{3,6}$').hasMatch(cleanBankCode)) {
+      cleanBankCode = '120001';
+    }
+
+    // Check balance only against the transfer amount
+    final double userBal = functions.stringtodouble(FFAppState().avalbal);
+    if (userBal > 0 && userBal < parsedAmount) {
+      final errMsg =
+          'Insufficient wallet balance: ₦${formatNumber(userBal, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)} available.';
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _pin = '';
+          _errorMessage = errMsg;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errMsg), backgroundColor: const Color(0xFFD32F2F)),
+        );
+      }
+      return;
+    }
+
+    // Generate fresh unique transaction reference
+    final currentTransRef = await actions.generatetransref();
+
+    final sessionToUse = FFAppState().sessionid.isNotEmpty
+        ? FFAppState().sessionid
+        : (widget.sessionid ?? await actions.generateseesionid());
+
+    final transtokenRes = await GettransactiontokenCall.call(
+      accessToken: FFAppState().bsptoken,
+      accountno: FFAppState().accountno,
+      deviceid: FFAppState().deviceid,
+      sessionid: sessionToUse,
+    );
+
+    final refId = GettransactiontokenCall.transtoken(transtokenRes.jsonBody);
+
+    // Register active payment attempt to engage duplicate transfer guard
+    PaymentGuardService.recordPaymentAttempt(
+      accountNumber: cleanReceiverAccount,
+      amount: parsedAmount,
+    );
+
+    final othertransRes = await WalletAsAServiceGroup.otherBankTransferCall.call(
+      customeraccount: cleanBankCode,
+      customername: widget.recipient,
+      customeraccountno: cleanReceiverAccount,
+      senderaccountno: FFAppState().accountno,
+      sendername: FFAppState().accountname,
+      narration: '${widget.recipient}',
+      amount: parsedAmount.toString(),
+      description: valueOrDefault<String>(widget.description, '-'),
+      refrence: currentTransRef,
+      sectionid: sessionToUse,
+      authToken: FFAppState().bsptoken,
+      refid: refId,
+      bankname: widget.bankname,
+    );
+
+    final isSuccess =
+        WalletAsAServiceGroup.otherBankTransferCall.success(othertransRes.jsonBody) == true;
+
+    if (isSuccess) {
+      // Save beneficiary
+      if (cleanReceiverAccount.isNotEmpty && (widget.recipient?.isNotEmpty ?? false)) {
+        final bName = (widget.bankname != null && widget.bankname!.trim().isNotEmpty)
+            ? widget.bankname!.trim()
+            : 'Bank';
+        BeneficiaryService.saveBeneficiary(
+          accountName: widget.recipient!,
+          accountNumber: cleanReceiverAccount,
+          bankName: bName,
+          bankCode: cleanBankCode,
+        );
+      }
+
+      // Record transaction
+      LocalVaultService.recordTransaction(
+        ref: currentTransRef,
+        amount: parsedAmount,
+        recipientName: widget.recipient ?? '',
+        recipientAccount: cleanReceiverAccount,
+        bankName: widget.bankname ?? '',
+        bankCode: cleanBankCode,
+        narration: valueOrDefault<String>(widget.description, '-'),
+        status: 'Successful',
+        type: 'debit',
+      );
+
+      // Deduct balance locally immediately for snappy UX
+      if (userBal >= parsedAmount) {
+        FFAppState().avalbal = (userBal - parsedAmount).toStringAsFixed(2);
+      }
+
+      if (FFAppState().voiceAnnouncementsActivated) {
+        TtsService.instance.announcePaymentSent(
+          amount: parsedAmount.toString(),
+          recipientName: widget.recipient ?? 'recipient',
+        );
+      }
+
+      if (mounted) {
+        setState(() => _isProcessing = false);
+        Navigator.pop(context, true);
+      }
+    } else {
+      final errorMsg = WalletAsAServiceGroup.otherBankTransferCall
+              .message(othertransRes.jsonBody) ??
+          'Transaction failed. Please try again.';
+
+      try {
+        await LogtransactionCall.call(
+          phoneno: FFAppState().phonenumber,
+          accountId: FFAppState().accountno,
+          reqtype: 'Transfer--${widget.amount}',
+          sSid: sessionToUse,
+          passorfail: 'Failed',
+          balBefore: FFAppState().avalbal,
+          balafter: FFAppState().avalbal,
+          beneficiary: widget.recipient,
+          tammt: widget.amount,
+          extra: widget.description,
+          transREF: currentTransRef,
+          accessToken: FFAppState().bsptoken,
+          ttype: 'Debit',
+        );
+      } catch (_) {}
+
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _pin = '';
+          _errorMessage = errorMsg;
+        });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMsg, style: const TextStyle(color: Colors.white)),
+            duration: const Duration(milliseconds: 4000),
+            backgroundColor: const Color(0xFFD32F2F),
           ),
         );
       }
@@ -399,24 +562,27 @@ class _TranserconfirmWidgetState extends State<TranserconfirmWidget> {
       currency: '₦',
     );
 
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF6F8F6),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24.0),
-          topRight: Radius.circular(24.0),
+    return PopScope(
+      canPop: !_isProcessing,
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          color: Color(0xFFF6F8F6),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24.0),
+            topRight: Radius.circular(24.0),
+          ),
         ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: _isProcessing
-              ? _buildProcessingView(formattedAmount)
-              : (_showPinView
-                  ? _buildPinInputView(formattedAmount)
-                  : _buildConfirmationView(formattedAmount)),
+        child: SafeArea(
+          top: false,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: _isProcessing
+                ? _buildProcessingView(formattedAmount)
+                : (_showPinView
+                    ? _buildPinInputView(formattedAmount)
+                    : _buildConfirmationView(formattedAmount)),
+          ),
         ),
       ),
     );

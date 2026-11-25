@@ -12,6 +12,7 @@ import '/backend/schema/structs/index.dart';
 import '/backend/schema/enums/enums.dart';
 import '/backend/sqlite/sqlite_manager.dart';
 import '/auth/custom_auth/auth_util.dart';
+import '/services/transaction_parser_service.dart';
 
 String stripSlash(String? value) {
   if (value == null || value.isEmpty) {
@@ -39,7 +40,12 @@ double stringtodouble(String? stringinput) {
   if (stringinput == null) {
     return 0.0;
   }
-  return double.tryParse(stringinput) ?? 0.0;
+  final clean = stringinput
+      .replaceAll('₦', '')
+      .replaceAll('N', '')
+      .replaceAll(',', '')
+      .trim();
+  return double.tryParse(clean) ?? 0.0;
 }
 
 String? removecode(String stringInput) {
@@ -601,153 +607,8 @@ String formatdate(String date) {
 }
 
 String processTransactionNarration(String narration) {
-  if (narration.isEmpty) return narration;
-
-  String processedNarration = narration.trim();
-
-  // Transfer transactions
-  if (processedNarration.startsWith('Transfer out to')) {
-    final parts = processedNarration.split('/');
-    if (parts.length >= 2) {
-      final accountNumber = parts[0].replaceAll('Transfer out to ', '').trim();
-      processedNarration = 'Transfer to Account $accountNumber';
-    }
-  }
-  // STP transactions
-  else if (processedNarration.startsWith('STP/')) {
-    final parts = processedNarration.split('/');
-    if (parts.length >= 3) {
-      final serviceType = parts[1].trim();
-      final provider = parts[2].trim();
-
-      switch (serviceType) {
-        case 'AIRTIME':
-          if (parts.length >= 5) {
-            final phoneNumber = parts[4].trim();
-            processedNarration = 'Airtime Purchase - $provider ($phoneNumber)';
-          } else {
-            processedNarration = 'Airtime Purchase - $provider';
-          }
-          break;
-        case 'DATA':
-          if (parts.length >= 5) {
-            final phoneNumber = parts[4].trim();
-            processedNarration = 'Data Purchase - $provider ($phoneNumber)';
-          } else {
-            processedNarration = 'Data Purchase - $provider';
-          }
-          break;
-        case 'BILLSPAYMENT':
-          if (parts.length >= 4) {
-            final biller = parts[3].trim();
-            processedNarration = 'Bill Payment - $biller';
-          } else {
-            processedNarration = 'Bill Payment';
-          }
-          break;
-        default:
-          processedNarration = 'StreetPay Service - $serviceType';
-      }
-    }
-  }
-  // Moneycode transactions
-  else if (processedNarration.startsWith('Moneycode/')) {
-    processedNarration = 'Moneycode Transaction';
-  }
-  // Coupon transactions
-  else if (processedNarration.startsWith('coupon_create_')) {
-    final parts = processedNarration.split('_');
-    if (parts.length >= 3) {
-      final amount = parts[2].split('/')[0].trim();
-      processedNarration = 'Coupon Creation - ₦$amount';
-    } else {
-      processedNarration = 'Coupon Creation';
-    }
-  }
-  // EMTL Fee transactions
-  else if (processedNarration == 'EMTL Fee') {
-    processedNarration = 'Transaction Fee';
-  }
-  // Reversal transactions
-  else if (processedNarration.startsWith('Reversal of')) {
-    processedNarration = 'Transaction Reversal';
-  }
-  // Bank transfers with account numbers
-  else if (processedNarration.contains('/') &&
-      processedNarration.contains('1100742371')) {
-    final parts = processedNarration.split('/');
-    if (parts.length >= 2) {
-      final senderName = parts[1].trim();
-      processedNarration = 'Transfer from $senderName';
-    }
-  }
-  // Generic account number patterns
-  else if (RegExp(r'^\d{10}$').hasMatch(processedNarration)) {
-    processedNarration = 'Transfer to Account $processedNarration';
-  }
-
-  // Smart cleanup - remove dates, integers, and technical references
-  processedNarration = processedNarration
-      // Remove technical references
-      .replaceAll(RegExp(r'STP-REF[A-Z0-9]+'), '')
-      .replaceAll(RegExp(r'DCBREF[A-Z0-9]+'), '')
-      .replaceAll(RegExp(r'BP-[A-Z]+'), '')
-      .replaceAll(RegExp(r'STP_REF[A-Z0-9]+'), '')
-      .replaceAll(RegExp(r'RA\d+'), '')
-
-      // Remove dates (various formats)
-      .replaceAll(RegExp(r'\d{4}-\d{2}-\d{2}'), '') // YYYY-MM-DD
-      .replaceAll(RegExp(r'\d{2}/\d{2}/\d{4}'), '') // DD/MM/YYYY
-      .replaceAll(RegExp(r'\d{2}-\d{2}-\d{4}'), '') // DD-MM-YYYY
-      .replaceAll(RegExp(r'\d{8}'), '') // YYYYMMDD
-      .replaceAll(RegExp(r'\d{6}'), '') // YYMMDD
-
-      // Remove long numeric sequences (likely reference numbers)
-      .replaceAll(RegExp(r'\d{10,}'), '')
-
-      // Remove account numbers and short numeric patterns
-      .replaceAll(RegExp(r'/\d{10}'), '')
-      .replaceAll(RegExp(r'/\d{6}'), '')
-      .replaceAll(RegExp(r'/\d{3}'), '')
-      .replaceAll(RegExp(r'\d{3,6}'), '')
-
-      // Remove standalone numbers (amounts, fees, etc.)
-      .replaceAll(RegExp(r'\b\d+\.?\d*\b'), '')
-
-      // Clean up separators and formatting
-      .replaceAll(RegExp(r'//+'), '/')
-      .replaceAll(RegExp(r'^/'), '')
-      .replaceAll(RegExp(r'/$'), '')
-      .replaceAll(RegExp(r'^[-_\s]+'), '') // Remove leading separators
-      .replaceAll(RegExp(r'[-_\s]+$'), '') // Remove trailing separators
-      .replaceAll(RegExp(r'[-_\s]{2,}'),
-          ' ') // Replace multiple separators with single space
-      .trim();
-
-  // Extract meaningful words and clean up
-  final words = processedNarration
-      .split(' ')
-      .where((word) =>
-              word.isNotEmpty &&
-              word.length > 2 &&
-              !RegExp(r'^\d+$').hasMatch(word) && // Not just numbers
-              !RegExp(r'^[A-Z0-9]{8,}$')
-                  .hasMatch(word) // Not long alphanumeric codes
-          )
-      .toList();
-
-  processedNarration = words.join(' ').trim();
-
-  // Final cleanup - remove multiple spaces
-  processedNarration =
-      processedNarration.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-  // If the processed narration is empty or too short, return a generic description
-  if (processedNarration.isEmpty || processedNarration.length < 3) {
-    return 'Transaction';
-  }
-
-  return processedNarration;
+  if (narration.isEmpty) return 'Transfer';
+  return TransactionParserService.cleanTitle(narration);
 }
 
 String? changeuserstatus(String? userstatus) {
@@ -884,4 +745,22 @@ FFUploadedFile? urltoupload(String? imageurl) {
     width: null,
     blurHash: null,
   );
+}
+
+String getBankName(dynamic banklist, String? code) {
+  if (code == null || code.trim().isEmpty) return 'Bank';
+  final cleanCode = code.trim();
+  if (banklist is Iterable) {
+    for (var bank in banklist) {
+      if (bank is Map) {
+        if (bank['bankCode']?.toString() == cleanCode ||
+            bank['bankName']?.toString().toLowerCase() == cleanCode.toLowerCase()) {
+          return bank['bankName']?.toString() ?? 'Bank';
+        }
+      }
+    }
+  }
+  final full = getBankFullName(cleanCode);
+  if (full != cleanCode && full.isNotEmpty) return full;
+  return 'Bank';
 }

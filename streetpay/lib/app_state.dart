@@ -61,7 +61,11 @@ class FFAppState extends ChangeNotifier {
       _hidden = await secureStorage.getBool('ff_hidden') ?? _hidden;
     }),
     _safeInitAsync(() async {
-      _show = await secureStorage.getBool('ff_show') ?? _show;
+      final savedShow = await secureStorage.getBool('ff_show');
+      if (savedShow != null) {
+        _show = savedShow;
+        _hidebal = !savedShow;
+      }
     }),
     _safeInitAsync(() async {
       _phonenumber =
@@ -161,7 +165,15 @@ class FFAppState extends ChangeNotifier {
           await secureStorage.getDouble('ff_progressvalue') ?? _progressvalue;
     }),
     _safeInitAsync(() async {
-      _avalbal = await secureStorage.getString('ff_avalbal') ?? _avalbal;
+      final storedBal = await secureStorage.getString('ff_avalbal');
+      if (storedBal != null && isValidBalance(storedBal)) {
+        _avalbal = storedBal;
+      } else {
+        _avalbal = '0.00';
+        if (storedBal != null) {
+          secureStorage.setString('ff_avalbal', '0.00');
+        }
+      }
     }),
     _safeInitAsync(() async {
       _cableitemlist = await secureStorage.getStringList('ff_cableitemlist') ??
@@ -441,7 +453,11 @@ class FFAppState extends ChangeNotifier {
       }
     }),
     _safeInitAsync(() async {
-      _hidebal = await secureStorage.getBool('ff_hidebal') ?? _hidebal;
+      final savedHidebal = await secureStorage.getBool('ff_hidebal');
+      if (savedHidebal != null) {
+        _hidebal = savedHidebal;
+        _show = !savedHidebal;
+      }
     }),
     _safeInitAsync(() async {
       _tempid = await secureStorage.getString('ff_tempid') ?? _tempid;
@@ -713,7 +729,9 @@ class FFAppState extends ChangeNotifier {
   bool get show => _show;
   set show(bool value) {
     _show = value;
+    _hidebal = !value;
     secureStorage.setBool('ff_show', value);
+    secureStorage.setBool('ff_hidebal', !value);
     notifyListeners();
   }
 
@@ -1900,15 +1918,83 @@ class FFAppState extends ChangeNotifier {
     secureStorage.delete(key: 'ff_progressvalue');
   }
 
-  String _avalbal = '';
-  String get avalbal => _avalbal;
+  String _avalbal = '0.00';
+  String get avalbal {
+    if (!isValidBalance(_avalbal)) {
+      return '0.00';
+    }
+    return _avalbal;
+  }
   set avalbal(String value) {
+    if (!isValidBalance(value)) {
+      if (!isValidBalance(_avalbal)) {
+        _avalbal = '0.00';
+        secureStorage.setString('ff_avalbal', '0.00');
+      }
+      return;
+    }
     _avalbal = value;
     secureStorage.setString('ff_avalbal', value);
   }
 
   void deleteAvalbal() {
-    secureStorage.delete(key: 'ff_avalbal');
+    _avalbal = '0.00';
+    secureStorage.setString('ff_avalbal', '0.00');
+  }
+
+  double _reservedBalance = 0.0;
+  int _pendingScheduleCount = 0;
+
+  double get reservedBalance => _reservedBalance;
+  int get pendingScheduleCount => _pendingScheduleCount;
+
+  void setReservedBalance(double val, [int count = 0]) {
+    _reservedBalance = val < 0.0 ? 0.0 : val;
+    _pendingScheduleCount = count < 0 ? 0 : count;
+    notifyListeners();
+  }
+
+  /// Ledger balance: Total funds held in account as reported by the bank
+  double get ledgerBalance {
+    final raw = avalbal
+        .replaceAll(',', '')
+        .replaceAll('₦', '')
+        .replaceAll('N', '')
+        .trim();
+    return double.tryParse(raw) ?? 0.0;
+  }
+
+  /// Available balance: Spendable funds in wallet. Instant transfers are never blocked by future schedules.
+  double get effectiveAvailableBalance {
+    return ledgerBalance;
+  }
+
+  String get availableBalanceString => effectiveAvailableBalance.toStringAsFixed(2);
+  String get ledgerBalanceString => ledgerBalance.toStringAsFixed(2);
+  String get reservedBalanceString => _reservedBalance.toStringAsFixed(2);
+
+  static bool isValidBalance(String? val) {
+    if (val == null) return false;
+    final trimmed = val.trim();
+    if (trimmed.isEmpty) return false;
+    if (trimmed.startsWith('{') ||
+        trimmed.startsWith('[') ||
+        trimmed.startsWith('<') ||
+        trimmed.toLowerCase().contains('error') ||
+        trimmed.toLowerCase().contains('success') ||
+        trimmed.toLowerCase().contains('message') ||
+        trimmed.toLowerCase().contains('exception') ||
+        trimmed.toLowerCase().contains('null') ||
+        trimmed.toLowerCase().contains('failed')) {
+      return false;
+    }
+    final clean = trimmed
+        .replaceAll('₦', '')
+        .replaceAll('N', '')
+        .replaceAll(',', '')
+        .trim();
+    final d = double.tryParse(clean);
+    return d != null && !d.isNaN && !d.isInfinite;
   }
 
   List<String> _cableitemlist = [];
@@ -3495,7 +3581,10 @@ class FFAppState extends ChangeNotifier {
   bool get hidebal => _hidebal;
   set hidebal(bool value) {
     _hidebal = value;
+    _show = !value;
     secureStorage.setBool('ff_hidebal', value);
+    secureStorage.setBool('ff_show', !value);
+    notifyListeners();
   }
 
   void deleteHidebal() {
@@ -3908,7 +3997,11 @@ extension FlutterSecureStorageExtensions on FlutterSecureStorage {
   Future<void> setString(String key, String value) async =>
       await writeSync(key: key, value: value);
 
-  Future<bool?> getBool(String key) async => (await read(key: key)) == 'true';
+  Future<bool?> getBool(String key) async {
+    final value = await read(key: key);
+    if (value == null) return null;
+    return value == 'true';
+  }
   Future<void> setBool(String key, bool value) async =>
       await writeSync(key: key, value: value.toString());
 

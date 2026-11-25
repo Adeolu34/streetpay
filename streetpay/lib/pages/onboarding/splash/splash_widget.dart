@@ -73,17 +73,17 @@ class _SplashWidgetState extends State<SplashWidget>
         trigger: AnimationTrigger.onPageLoad,
         effectsBuilder: () => [
           FadeEffect(
-            curve: Curves.easeIn,
+            curve: Curves.easeOut,
             delay: 0.0.ms,
-            duration: 600.0.ms,
+            duration: 800.0.ms,
             begin: 0.0,
             end: 1.0,
           ),
           ScaleEffect(
-            curve: Curves.easeOut,
+            curve: Curves.easeOutCubic,
             delay: 0.0.ms,
-            duration: 800.0.ms,
-            begin: const Offset(1.04, 1.04),
+            duration: 1200.0.ms,
+            begin: const Offset(0.92, 0.92),
             end: const Offset(1.0, 1.0),
           ),
         ],

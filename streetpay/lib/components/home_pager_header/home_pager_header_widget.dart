@@ -1,9 +1,11 @@
-﻿import '/backend/api_requests/api_calls.dart';
+import '/backend/api_requests/api_calls.dart';
+import '/services/scheduled_payment_service.dart';
 import '/components/profile_header/profile_header_widget.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_toggle_icon.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/custom_functions.dart' as functions;
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -42,6 +44,7 @@ class _HomePagerHeaderWidgetState extends State<HomePagerHeaderWidget> {
     // On component load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       FFAppState().accountno = widget.accountno!;
+      await ScheduledPaymentService.refreshReservedBalance();
       safeSetState(() {});
     });
   }
@@ -202,12 +205,15 @@ class _HomePagerHeaderWidgetState extends State<HomePagerHeaderWidget> {
                                 authToken: FFAppState().bsptoken,
                               );
 
-                              FFAppState().avalbal =
+                              final enquiryBal =
                                   WalletAsAServiceGroup.walletEnquiryCall
                                       .availablebalance(
                                         (_model.wallet?.jsonBody ?? ''),
-                                      )!
-                                      .toString();
+                                      );
+                              if (enquiryBal != null) {
+                                FFAppState().avalbal = enquiryBal.toString();
+                              }
+                              await ScheduledPaymentService.refreshReservedBalance();
                               safeSetState(() {});
 
                               context.pushNamed(NewhomeWidget.routeName);
@@ -216,26 +222,62 @@ class _HomePagerHeaderWidgetState extends State<HomePagerHeaderWidget> {
                             },
                           ),
                           if (!FFAppState().hidebal)
-                            Text(
-                              '₦ ${FFAppState().avalbal}',
-                              style: FlutterFlowTheme.of(context)
-                                  .bodyMedium
-                                  .override(
-                                    font: GoogleFonts.readexPro(
-                                      fontWeight: FontWeight.w800,
-                                      fontStyle: FlutterFlowTheme.of(context)
-                                          .bodyMedium
-                                          .fontStyle,
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text(
+                                  '₦ ${formatNumber(FFAppState().effectiveAvailableBalance, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)}',
+                                  style: FlutterFlowTheme.of(context)
+                                      .bodyMedium
+                                      .override(
+                                        font: GoogleFonts.readexPro(
+                                          fontWeight: FontWeight.w800,
+                                          fontStyle: FlutterFlowTheme.of(context)
+                                              .bodyMedium
+                                              .fontStyle,
+                                        ),
+                                        color: FlutterFlowTheme.of(context)
+                                            .primaryBackground,
+                                        fontSize: 30.0,
+                                        letterSpacing: 0.0,
+                                        fontWeight: FontWeight.w800,
+                                        fontStyle: FlutterFlowTheme.of(context)
+                                            .bodyMedium
+                                            .fontStyle,
+                                      ),
+                                ),
+                                if (FFAppState().reservedBalance > 0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6.0),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 3.5),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(20.0),
+                                        border: Border.all(
+                                          color: Colors.white.withValues(alpha: 0.18),
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.lock_clock_rounded, size: 11.0, color: Colors.white),
+                                          const SizedBox(width: 5.0),
+                                          Text(
+                                            'Ledger: ₦${formatNumber(FFAppState().ledgerBalance, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)}  •  ₦${formatNumber(FFAppState().reservedBalance, formatType: FormatType.decimal, decimalType: DecimalType.periodDecimal)} held',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryBackground,
-                                    fontSize: 30.0,
-                                    letterSpacing: 0.0,
-                                    fontWeight: FontWeight.w800,
-                                    fontStyle: FlutterFlowTheme.of(context)
-                                        .bodyMedium
-                                        .fontStyle,
                                   ),
+                              ],
                             ),
                           if (FFAppState().hidebal)
                             Align(

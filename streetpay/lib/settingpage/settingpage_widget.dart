@@ -499,6 +499,72 @@ class _SettingpageWidgetState extends State<SettingpageWidget> {
 
                     const SizedBox(height: 16.0),
 
+                    // ── Business & Staff Access section ──────
+                    _buildSectionCard(
+                      title: 'Business & Delegation',
+                      items: [
+                        _buildSettingsTile(
+                          icon: Icons.badge_outlined,
+                          label: 'Staff & Cashier Access',
+                          subtitle: 'Grant or manage cashier access to your wallet',
+                          iconBgColor: const Color(0xFFE8F5E9),
+                          iconColor: const Color(0xFF2E7D32),
+                          onTap: () {
+                            context.pushNamed(
+                              GrantAccessWidget.routeName,
+                              queryParameters: {
+                                'phoneno': serializeParam(
+                                  functions.removecode(FFAppState().phonenumber),
+                                  ParamType.String,
+                                ),
+                              }.withoutNulls,
+                            );
+                          },
+                        ),
+                        _buildDivider(),
+                        _buildSettingsTile(
+                          icon: Icons.switch_account_outlined,
+                          label: 'Accounts Delegated to Me',
+                          subtitle: 'View accounts where you have guest access',
+                          iconBgColor: const Color(0xFFE0F2F1),
+                          iconColor: const Color(0xFF00796B),
+                          onTap: () {
+                            context.pushNamed(
+                              ViewmyaccesWidget.routeName,
+                              queryParameters: {
+                                'phoneno': serializeParam(
+                                  functions.removecode(FFAppState().phonenumber),
+                                  ParamType.String,
+                                ),
+                              }.withoutNulls,
+                            );
+                          },
+                        ),
+                        _buildDivider(),
+                        _buildSettingsTile(
+                          icon: Icons.checklist_rtl_rounded,
+                          label: 'Batch Payouts',
+                          subtitle: 'Manage bulk payouts and wage disbursements',
+                          iconBgColor: const Color(0xFFFFF3E0),
+                          iconColor: const Color(0xFFE65100),
+                          onTap: () =>
+                              context.pushNamed(ViewbatchWidget.routeName),
+                        ),
+                        _buildDivider(),
+                        _buildSettingsTile(
+                          icon: Icons.schedule_rounded,
+                          label: 'Scheduled Payments',
+                          subtitle: 'Track automated single & batch transfers',
+                          iconBgColor: const Color(0xFFE8EAF6),
+                          iconColor: const Color(0xFF3F51B5),
+                          onTap: () =>
+                              context.pushNamed(ScheduledPaymentsWidget.routeName),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16.0),
+
                     // ── Support & Legal section ──────────────
                     _buildSectionCard(
                       title: 'Support & Legal',

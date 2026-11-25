@@ -83,6 +83,51 @@ class TtsService {
     await speak(script, force: force);
   }
 
+  /// Announces an incoming payment receipt out loud (Virtual Soundbox mode for merchants)
+  Future<void> announcePaymentReceipt({
+    required String amount,
+    required String senderName,
+    String? narration,
+  }) async {
+    final cleanAmount = amount
+        .replaceAll('₦', '')
+        .replaceAll('+', '')
+        .replaceAll('-', '')
+        .trim();
+
+    final sender =
+        senderName.trim().isNotEmpty ? senderName.trim() : 'a customer';
+    final script =
+        'StreetPay alert! You have received $cleanAmount naira from $sender.';
+    await speak(script, force: true);
+  }
+
+  /// Announces an outgoing transfer or bill payment confirmation
+  Future<void> announcePaymentSent({
+    required String amount,
+    required String recipientName,
+  }) async {
+    final cleanAmount = amount
+        .replaceAll('₦', '')
+        .replaceAll('+', '')
+        .replaceAll('-', '')
+        .trim();
+
+    final recipient =
+        recipientName.trim().isNotEmpty ? recipientName.trim() : 'recipient';
+    final script =
+        'Transfer successful! $cleanAmount naira sent to $recipient.';
+    await speak(script, force: false);
+  }
+
+  /// Speaks test soundbox announcement when merchant toggles it ON
+  Future<void> testSoundbox() async {
+    await speak(
+      'StreetBox audio confirmation is now active! Every incoming payment will be announced loudly.',
+      force: true,
+    );
+  }
+
   void stop() {
     _tts.stop();
   }

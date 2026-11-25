@@ -203,6 +203,44 @@ class _SendChoiceWidgetState extends State<SendChoiceWidget> {
                       onTap: () => _openOtherBanks(),
                     ),
 
+                    const SizedBox(height: 14),
+
+                    _TransferOptionCard(
+                      icon: Icons.checklist_rtl_rounded,
+                      iconBg: const Color(0xFFFFF3E0),
+                      iconColor: const Color(0xFFE65100),
+                      accentColor: const Color(0xFFF57C00),
+                      title: 'Batch / Multi-Pay',
+                      description:
+                          'Send money to multiple people, staff wages, or market suppliers in one batch.',
+                      badge: 'Batch Payout',
+                      badgeBg: const Color(0xFFFFF3E0),
+                      badgeColor: const Color(0xFFE65100),
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        context.pushNamed(ViewbatchWidget.routeName);
+                      },
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    _TransferOptionCard(
+                      icon: Icons.schedule_rounded,
+                      iconBg: const Color(0xFFF3E5F5),
+                      iconColor: const Color(0xFF7B1FA2),
+                      accentColor: const Color(0xFF8E24AA),
+                      title: 'Scheduled Payments',
+                      description:
+                          'View, track, or manage automated transfers and future batch disbursements.',
+                      badge: 'Auto-Pay',
+                      badgeBg: const Color(0xFFF3E5F5),
+                      badgeColor: const Color(0xFF7B1FA2),
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        context.pushNamed(ScheduledPaymentsWidget.routeName);
+                      },
+                    ),
+
                     const SizedBox(height: 32),
 
                     // ── Recent beneficiaries ─────────────────────────

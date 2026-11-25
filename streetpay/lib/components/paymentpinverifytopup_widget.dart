@@ -11,6 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:webviewx_plus/webviewx_plus.dart';
+import '/services/tts_service.dart';
+import '/services/payment_guard_service.dart';
 import 'paymentpinverifytopup_model.dart';
 export 'paymentpinverifytopup_model.dart';
 
@@ -107,6 +109,41 @@ class _PaymentpinverifytopupWidgetState
   Future<void> _submitDataPayment({bool viaFingerprint = false}) async {
     if (_isProcessing) return;
     if (!viaFingerprint && _pin.length != 5) return;
+
+    if (!PaymentGuardService.canTapButton()) return;
+
+    final cleanPhone = (widget.receipent ?? widget.phoneno ?? '')
+        .replaceAll(RegExp(r'\D'), '');
+    final parsedAmount = functions.stringtodouble(widget.amount ?? '0');
+
+    final remainingCooldown = PaymentGuardService.getRemainingCooldown(
+      accountNumber: cleanPhone,
+      amount: parsedAmount,
+    );
+    if (remainingCooldown > 0) {
+      PaymentGuardService.showDuplicateWarningDialog(
+        context: context,
+        recipientName: widget.receipent ?? cleanPhone,
+        accountNumber: cleanPhone,
+        amount: parsedAmount,
+        remainingSeconds: remainingCooldown,
+        serviceType: 'Data Purchase',
+      );
+      return;
+    }
+
+    if (!PaymentGuardService.acquireLock()) {
+      setState(() {
+        _isProcessing = false;
+        _pin = '';
+      });
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
     try {
       await _doSubmitDataPayment(viaFingerprint: viaFingerprint)
           .timeout(const Duration(seconds: 30));
@@ -122,6 +159,11 @@ class _PaymentpinverifytopupWidgetState
               style: TextStyle(color: Colors.white)),
           backgroundColor: Color(0xFFD9383A),
         ));
+      }
+    } finally {
+      PaymentGuardService.releaseLock();
+      if (mounted && _isProcessing) {
+        setState(() => _isProcessing = false);
       }
     }
   }
@@ -180,6 +222,10 @@ class _PaymentpinverifytopupWidgetState
 
         final dataTransRef = await actions.generatetransref();
 
+        final cleanPhone = (widget.receipent ?? widget.phoneno ?? '').replaceAll(RegExp(r'\D'), '');
+        final parsedAmount = functions.stringtodouble(widget.amount ?? '0');
+        PaymentGuardService.recordPaymentAttempt(accountNumber: cleanPhone, amount: parsedAmount);
+
         _model.apiResultqua = await VasCollectionGroup.datatopupCall.call(
           debitaccount: FFAppState().accountno,
           productid: widget.productId,
@@ -229,6 +275,13 @@ class _PaymentpinverifytopupWidgetState
           _resultServiceType = '${widget.network ?? ""} Data${widget.dataplan != null ? " (${widget.dataplan})" : ""}';
           _isProcessing = false;
         });
+
+        if (purchaseStatus && FFAppState().voiceAnnouncementsActivated) {
+          TtsService.instance.announcePaymentSent(
+            amount: widget.amount ?? '0',
+            recipientName: '${widget.network ?? ""} Data for ${widget.receipent ?? ""}',
+          );
+        }
       } else {
         setState(() {
           _isProcessing = false;
@@ -477,15 +530,17 @@ class _PaymentpinverifytopupWidgetState
       );
     }
 
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(28.0),
-          topRight: Radius.circular(28.0),
+    return PopScope(
+      canPop: !_isProcessing,
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(28.0),
+            topRight: Radius.circular(28.0),
+          ),
         ),
-      ),
       child: SafeArea(
         top: false,
         child: Stack(
@@ -690,6 +745,7 @@ class _PaymentpinverifytopupWidgetState
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }

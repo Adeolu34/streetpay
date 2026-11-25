@@ -137,3 +137,5 @@ export '/publicoffer/publicoffer/publicoffer_widget.dart'
 export '/pages/onboarding/registrationsuccess/registrationsuccess_widget.dart'
     show RegistrationsuccessWidget;
 export '/pages/yarnchat/yarnchat_page_widget.dart' show YarnChatPageWidget;
+export '/pages/payments/scheduled_payments/scheduled_payments_widget.dart'
+    show ScheduledPaymentsWidget;
