@@ -5,8 +5,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Target resolutions for App Store Connect
 SIZES = {
-    '6.7_inch': (1290, 2796),  # iPhone 16 Pro Max / 15 Pro Max / 14 Pro Max
-    '6.5_inch': (1242, 2688),  # iPhone 11 Pro Max / XS Max
+    '6.7_inch': (1290, 2796),       # iPhone 16 Pro Max / 15 Pro Max / 14 Pro Max
+    '6.5_inch': (1242, 2688),       # iPhone 11 Pro Max / XS Max
+    '6.3_inch': (1206, 2622),       # iPhone 16 Pro
+    '6.1_inch': (1179, 2556),       # iPhone 16 / 15 / 15 Pro / 14 Pro
+    'ipad_13_inch': (2064, 2752),   # iPad Pro 13-inch (M4) / iPad Air 13-inch
+    'ipad_12_9_inch': (2048, 2732), # iPad Pro 12.9-inch (3rd-6th gen)
 }
 
 # Brand Colors
@@ -113,7 +117,7 @@ def render_screen_1(w, h):
     draw_vertical_gradient(draw, w, h, COLOR_BG_TOP, (13, 38, 28))
     draw_glowing_circle(img, (w // 2, 850), 550, COLOR_EMERALD, max_alpha=40)
     
-    scale = w / 1290.0
+    scale = min(w / 1290.0, h / 2796.0)
     
     # Top Marketing Banner
     font_tag = get_font(int(24 * scale), bold=True)
@@ -235,7 +239,7 @@ def render_screen_2(w, h):
     draw = ImageDraw.Draw(img)
     draw_vertical_gradient(draw, w, h, COLOR_BG_TOP, (14, 40, 30))
     draw_glowing_circle(img, (w // 2, 850), 550, COLOR_EMERALD, max_alpha=40)
-    scale = w / 1290.0
+    scale = min(w / 1290.0, h / 2796.0)
     
     font_tag = get_font(int(24 * scale), bold=True)
     font_title = get_font(int(64 * scale), bold=True)
@@ -331,7 +335,7 @@ def render_screen_3(w, h):
     draw = ImageDraw.Draw(img)
     draw_vertical_gradient(draw, w, h, COLOR_BG_TOP, (12, 36, 26))
     draw_glowing_circle(img, (w // 2, 950), 600, COLOR_EMERALD, max_alpha=50)
-    scale = w / 1290.0
+    scale = min(w / 1290.0, h / 2796.0)
     
     font_tag = get_font(int(24 * scale), bold=True)
     font_title = get_font(int(64 * scale), bold=True)
@@ -405,7 +409,7 @@ def render_screen_4(w, h):
     draw = ImageDraw.Draw(img)
     draw_vertical_gradient(draw, w, h, COLOR_BG_TOP, (14, 38, 28))
     draw_glowing_circle(img, (w // 2, 850), 550, COLOR_EMERALD, max_alpha=40)
-    scale = w / 1290.0
+    scale = min(w / 1290.0, h / 2796.0)
     
     font_tag = get_font(int(24 * scale), bold=True)
     font_title = get_font(int(64 * scale), bold=True)
@@ -487,7 +491,7 @@ def render_screen_5(w, h):
     draw = ImageDraw.Draw(img)
     draw_vertical_gradient(draw, w, h, COLOR_BG_TOP, (14, 38, 28))
     draw_glowing_circle(img, (w // 2, 850), 550, COLOR_EMERALD, max_alpha=40)
-    scale = w / 1290.0
+    scale = min(w / 1290.0, h / 2796.0)
     
     font_tag = get_font(int(24 * scale), bold=True)
     font_title = get_font(int(64 * scale), bold=True)
@@ -577,9 +581,18 @@ def main():
         ("5_bills_and_airtime", render_screen_5),
     ]
     
+    downloads_target = r"C:\Users\johna\Downloads\streetpay_screenshots"
+    can_copy_downloads = os.path.exists(r"C:\Users\johna\Downloads")
+    if can_copy_downloads:
+        os.makedirs(downloads_target, exist_ok=True)
+        
     for size_name, (w, h) in SIZES.items():
         out_dir = os.path.join("screenshots", size_name)
         os.makedirs(out_dir, exist_ok=True)
+        dl_size_dir = os.path.join(downloads_target, size_name) if can_copy_downloads else None
+        if dl_size_dir:
+            os.makedirs(dl_size_dir, exist_ok=True)
+            
         print(f"\nRendering for {size_name} ({w}x{h}):")
         for filename, renderer in screens:
             out_path = os.path.join(out_dir, f"{filename}.png")
@@ -587,8 +600,14 @@ def main():
             img = renderer(w, h)
             img.save(out_path, format="PNG", optimize=True)
             print(f"     Saved to {out_path} ({os.path.getsize(out_path) // 1024} KB)")
-            
-    print("\nAll 10 App Store screenshots (5 screens in both 6.7-inch and 6.5-inch) generated successfully!")
+            if dl_size_dir:
+                dl_path = os.path.join(dl_size_dir, f"{filename}.png")
+                img.save(dl_path, format="PNG", optimize=True)
+                
+    total_screens = len(SIZES) * len(screens)
+    print(f"\nAll {total_screens} App Store screenshots ({len(screens)} screens across {len(SIZES)} device formats) generated successfully!")
+    if can_copy_downloads:
+        print(f"Screenshots also copied directly to: {downloads_target}")
 
 if __name__ == '__main__':
     main()

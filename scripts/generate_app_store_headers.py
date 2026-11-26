@@ -602,4 +602,13 @@ def render_header_3840x1646():
 if __name__ == "__main__":
     h1 = render_header_5244x2950()
     h2 = render_header_3840x1646()
+    
+    # Also copy directly to Downloads if available
+    dl_dir = r"C:\Users\johna\Downloads"
+    if os.path.exists(dl_dir):
+        import shutil
+        shutil.copy2(h1, os.path.join(dl_dir, "app_store_feature_5244x2950.png"))
+        shutil.copy2(h2, os.path.join(dl_dir, "app_store_banner_3840x1646.png"))
+        print(f"Also copied both banners to: {dl_dir}")
+        
     print("Done! Both App Store header banners created successfully.")
