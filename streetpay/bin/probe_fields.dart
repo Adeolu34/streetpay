@@ -7,8 +7,8 @@ void main() async {
     Uri.parse('https://api.mypingapi.com/sp/AuthSP'),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({
-      'userId': 'Paysp1010\$i.i',
-      'secretKey': '\$2a\$10\$3JK3bVeSVXW0xrVzqmvUmu/tX.XLoUqbwPxTYqZdDz1QHMB2jhDxm',
+      'userId': Platform.environment['SP_AUTH_USER_ID'] ?? '',
+      'secretKey': Platform.environment['SP_AUTH_SECRET_KEY'] ?? '',
     }),
   );
   final token = jsonDecode(authResp.body)['token'];

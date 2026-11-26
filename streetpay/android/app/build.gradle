@@ -72,7 +72,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig (keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug)
+            // Never fall back to the debug key: an unsigned-by-us release is a
+            // build error (see the taskGraph check below).
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
@@ -80,6 +82,14 @@ android {
 
 flutter {
     source '../..'
+}
+
+// Fail loudly if someone builds a release without the real signing key.
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any { it.name.toLowerCase().contains('release') && (it.name.startsWith('assemble') || it.name.startsWith('bundle') || it.name.startsWith('package')) }
+    if (wantsRelease && !keystorePropertiesFile.exists()) {
+        throw new GradleException('android/key.properties not found - refusing to sign a release build with the debug key. See key.properties.example.')
+    }
 }
 
 dependencies {

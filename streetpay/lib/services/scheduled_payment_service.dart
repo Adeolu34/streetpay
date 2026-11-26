@@ -402,9 +402,10 @@ class ScheduledPaymentService {
       // 1. Acquire fresh StreetAuth token
       final authResp = await StreetauthCall.call(forceRefresh: true);
       final freshToken = StreetauthCall.streettoken(authResp.jsonBody) ??
-          (FFAppState().bsptoken.isNotEmpty
-              ? FFAppState().bsptoken
-              : 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJQYXlzcDEwMTAkaS5pIiwiaWF0IjoxNzcxNzk1NDgwLCJleHAiOjE3NzUzOTU0ODB9.z3jZyAUV1kOvQKD-Y7eXbMi2yhZNtuFObnWc63JoR7w');
+          FFAppState().bsptoken;
+      if (freshToken.isEmpty) {
+        throw Exception('No auth token available for scheduled payment');
+      }
       FFAppState().bsptoken = freshToken;
 
       // 2. Validate PIN code / acquire session

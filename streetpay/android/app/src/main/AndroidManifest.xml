@@ -43,9 +43,8 @@
     android:label="streetpay"
     tools:replace="android:label"
     android:icon="@mipmap/launcher_icon"
-    android:allowBackup="true"
+    android:allowBackup="false"
     android:largeHeap="true"
-    android:requestLegacyExternalStorage="true"
     android:usesCleartextTraffic="false"
   >
     <service

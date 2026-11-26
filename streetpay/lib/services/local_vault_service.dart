@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -100,7 +99,7 @@ class LocalVaultService {
       _initialized = true;
 
       // Check if internal database is fresh / empty and attempt automatic restoration
-      await _autoRestoreFromPublicMirrorIfEmpty();
+      await _deleteLegacyPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] DB Init error: $e');
     }
@@ -160,8 +159,6 @@ class LocalVaultService {
         );
       }
 
-      // Mirror asynchronously to public external storage
-      _triggerPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] saveBeneficiary error: $e');
     }
@@ -241,7 +238,6 @@ class LocalVaultService {
         where: 'account_number = ?',
         whereArgs: [accountNumber.trim()],
       );
-      _triggerPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] deleteBeneficiary error: $e');
     }
@@ -284,7 +280,6 @@ class LocalVaultService {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-      _triggerPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] recordTransaction error: $e');
     }
@@ -356,7 +351,6 @@ class LocalVaultService {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-      _triggerPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] saveScheduledPayment error: $e');
     }
@@ -408,7 +402,6 @@ class LocalVaultService {
         where: 'id = ?',
         whereArgs: [id],
       );
-      _triggerPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] updateScheduledStatus error: $e');
     }
@@ -422,7 +415,6 @@ class LocalVaultService {
         where: 'id = ?',
         whereArgs: [id],
       );
-      _triggerPublicMirror();
     } catch (e) {
       debugPrint('[LocalVaultService] deleteScheduledPayment error: $e');
     }
@@ -474,104 +466,28 @@ class LocalVaultService {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // UNINSTALL-PROOF PUBLIC STORAGE MIRROR & AUTO-RESTORATION
+  // LEGACY CLEANUP
+  // Older builds mirrored beneficiaries, transactions and scheduled payments
+  // as plain JSON into shared public storage (readable by other apps, and
+  // auto-restored from there). That export and the auto-restore were removed;
+  // this deletes any file an earlier build left behind.
   // ──────────────────────────────────────────────────────────────────────────
 
-  static Future<File?> _getPublicMirrorFile() async {
+  static Future<void> _deleteLegacyPublicMirror() async {
     try {
-      Directory? baseDir;
-      if (Platform.isAndroid) {
-        // Standard public Documents directory on Android (/storage/emulated/0/Documents)
-        final publicDocDir = Directory('/storage/emulated/0/Documents/$_publicDirName');
-        if (!await publicDocDir.exists()) {
-          try {
-            await publicDocDir.create(recursive: true);
-          } catch (_) {}
-        }
-        if (await publicDocDir.exists()) {
-          baseDir = publicDocDir;
-        }
-      }
-
-      if (baseDir == null) {
-        final docs = await getApplicationDocumentsDirectory();
-        final backupDir = Directory(p.join(docs.path, _publicDirName));
-        if (!await backupDir.exists()) await backupDir.create(recursive: true);
-        baseDir = backupDir;
-      }
-
-      return File(p.join(baseDir.path, _mirrorFileName));
-    } catch (e) {
-      debugPrint('[LocalVaultService] getPublicMirrorFile error: $e');
-      return null;
-    }
-  }
-
-  static void _triggerPublicMirror() {
-    // Debounce or run asynchronous export without blocking the UI
-    Future.microtask(() async {
+      final candidates = <File>[
+        if (Platform.isAndroid)
+          File('/storage/emulated/0/Documents/$_publicDirName/$_mirrorFileName'),
+      ];
       try {
-        final file = await _getPublicMirrorFile();
-        if (file == null) return;
-
-        final db = await getDatabase();
-        final beneficiaries = await db.query('beneficiaries');
-        final transactions = await db.query('transactions', limit: 100);
-        final scheduled = await db.query('scheduled_payments');
-
-        final payload = {
-          'version': 1,
-          'exportedAt': DateTime.now().toIso8601String(),
-          'beneficiaries': beneficiaries,
-          'transactions': transactions,
-          'scheduled_payments': scheduled,
-        };
-
-        await file.writeAsString(jsonEncode(payload), flush: true);
-        debugPrint('[LocalVaultService] Public mirror updated at: ${file.path}');
-      } catch (e) {
-        debugPrint('[LocalVaultService] Public mirror write error: $e');
+        final docs = await getApplicationDocumentsDirectory();
+        candidates.add(File(p.join(docs.path, _publicDirName, _mirrorFileName)));
+      } catch (_) {}
+      for (final f in candidates) {
+        try {
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
       }
-    });
-  }
-
-  static Future<void> _autoRestoreFromPublicMirrorIfEmpty() async {
-    try {
-      final db = _db;
-      if (db == null) return;
-
-      final countResult = await db.rawQuery('SELECT COUNT(*) as count FROM beneficiaries');
-      final currentBeneficiariesCount = (countResult.first['count'] as int?) ?? 0;
-
-      // Only attempt auto-restore if the database has 0 beneficiaries
-      if (currentBeneficiariesCount > 0) return;
-
-      final file = await _getPublicMirrorFile();
-      if (file == null || !await file.exists()) return;
-
-      final content = await file.readAsString();
-      if (content.trim().isEmpty) return;
-
-      final data = jsonDecode(content) as Map<String, dynamic>;
-      final restoredBeneficiaries = (data['beneficiaries'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      final restoredTransactions = (data['transactions'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      final restoredScheduled = (data['scheduled_payments'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-
-      final batch = db.batch();
-      for (final b in restoredBeneficiaries) {
-        batch.insert('beneficiaries', b, conflictAlgorithm: ConflictAlgorithm.ignore);
-      }
-      for (final t in restoredTransactions) {
-        batch.insert('transactions', t, conflictAlgorithm: ConflictAlgorithm.ignore);
-      }
-      for (final s in restoredScheduled) {
-        batch.insert('scheduled_payments', s, conflictAlgorithm: ConflictAlgorithm.ignore);
-      }
-
-      await batch.commit(noResult: true);
-      debugPrint('[LocalVaultService] Auto-restored ${restoredBeneficiaries.length} beneficiaries, ${restoredTransactions.length} transactions, and ${restoredScheduled.length} schedules from public mirror!');
-    } catch (e) {
-      debugPrint('[LocalVaultService] Auto-restore error: $e');
-    }
+    } catch (_) {}
   }
 }
