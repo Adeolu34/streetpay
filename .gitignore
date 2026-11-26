@@ -44,3 +44,5 @@ ff-workspace/
 ref_video.mp4
 device_screen*.png
 screen_*.png
+config.bat
+node_modules
