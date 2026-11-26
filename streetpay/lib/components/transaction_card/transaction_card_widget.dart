@@ -1,6 +1,7 @@
 import '/flutter_flow/flutter_flow_util.dart';
 import '/pages/payments/payment_receipt/payment_receipt_widget.dart';
 import '/services/telco_logo_service.dart';
+import '/services/transaction_history_service.dart';
 import '/services/transaction_parser_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +20,7 @@ class TransactionCardWidget extends StatefulWidget {
     required this.debitsubtitle,
     this.rawItem,
     this.onTap,
+    this.compactSubtitle = false,
   })  : this.credittitle = credittitle ?? '',
         this.creditsubtitle = creditsubtitle ?? '',
         this.creditamount = creditamount ?? '';
@@ -31,6 +33,9 @@ class TransactionCardWidget extends StatefulWidget {
   final String? debitsubtitle;
   final dynamic rawItem;
   final VoidCallback? onTap;
+
+  /// When true the subtitle shows "Category · 2:14 PM" (used under day headers).
+  final bool compactSubtitle;
 
   @override
   State<TransactionCardWidget> createState() => _TransactionCardWidgetState();
@@ -604,7 +609,23 @@ class _TransactionCardWidgetState extends State<TransactionCardWidget> {
     final isReversed = parsed.isReversed;
     final formattedAmount = _formatAmountDisplay(parsed.amount, parsed.isCredit, isReversed);
 
-    return Material(
+    var subtitleText = parsed.dateString;
+    if (widget.compactSubtitle) {
+      final d = TransactionHistoryService.parseDate(parsed.dateString);
+      if (d != null) {
+        final hasTime = d.hour != 0 || d.minute != 0 || d.second != 0;
+        subtitleText = hasTime
+            ? '${parsed.categoryLabel} · ${DateFormat('h:mm a').format(d)}'
+            : parsed.categoryLabel;
+      }
+    }
+
+    return Semantics(
+      button: true,
+      label:
+          '${parsed.title}, ${parsed.isCredit ? 'received' : 'sent'} $formattedAmount, ${parsed.status}, $subtitleText',
+      excludeSemantics: true,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
@@ -663,7 +684,7 @@ class _TransactionCardWidgetState extends State<TransactionCardWidget> {
                       children: [
                         Flexible(
                           child: Text(
-                            parsed.dateString,
+                            subtitleText,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.inter(
@@ -720,6 +741,6 @@ class _TransactionCardWidgetState extends State<TransactionCardWidget> {
           ),
         ),
       ),
-    );
+    ));
   }
 }

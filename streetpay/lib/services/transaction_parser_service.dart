@@ -219,18 +219,16 @@ class TransactionParserService {
     if (cleanTitle.isEmpty && (upperNarr.contains('/AIRTIME') || upperNarr.contains('AIRTIME'))) {
       category = 'airtime';
       categoryLabel = 'Airtime Top-up';
-      network ??= 'MTN';
       final phonePart = phone != null ? ' ($phone)' : '';
-      cleanTitle = '$network Airtime$phonePart';
+      cleanTitle = '${network ?? ''} Airtime$phonePart'.trim();
     }
 
     // Check Data
-    if (cleanTitle.isEmpty && (upperNarr.contains('/DATA') || upperNarr.contains('DATA'))) {
+    if (cleanTitle.isEmpty && (upperNarr.contains('/DATA') || RegExp(r'\bDATA\b').hasMatch(upperNarr))) {
       category = 'data';
       categoryLabel = 'Data Bundle';
-      network ??= 'MTN';
       final phonePart = phone != null ? ' ($phone)' : '';
-      cleanTitle = '$network Data$phonePart';
+      cleanTitle = '${network ?? ''} Data$phonePart'.trim();
     }
 
     // Check Bill Payments & Utilities

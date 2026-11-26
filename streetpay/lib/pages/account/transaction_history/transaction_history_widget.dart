@@ -1,19 +1,32 @@
 import '/backend/api_requests/api_calls.dart';
 import '/components/bottom_app_bar/bottom_app_bar_widget.dart';
-import '/components/overview_card/overview_card_widget.dart';
-import '/components/overview_carddebit/overview_carddebit_widget.dart';
 import '/components/transaction_card/transaction_card_widget.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import '/flutter_flow/custom_functions.dart' as functions;
 import '/services/local_vault_service.dart';
-import '/services/transaction_parser_service.dart';
+import '/services/transaction_history_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'transaction_history_model.dart';
 export 'transaction_history_model.dart';
+
+enum _Period { days7, days30, days90, custom }
+
+/// Brand colours used on this screen.
+class _C {
+  static const green = Color(0xFF00A651);
+  static const ink = Color(0xFF111827);
+  static const muted = Color(0xFF6B7280);
+  static const line = Color(0xFFE5E7EB);
+  static const bg = Color(0xFFF7F9F7);
+  static const red = Color(0xFFDC2626);
+}
+
+/// The wallet API accepts at most 30 days per request.
+const int _kWindowDays = 30;
+const int _kMaxWindowsPerLoad = 12;
 
 class TransactionHistoryWidget extends StatefulWidget {
   const TransactionHistoryWidget({
@@ -36,514 +49,622 @@ class TransactionHistoryWidget extends StatefulWidget {
 class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
   late TransactionHistoryModel _model;
   final scaffoldKey = GlobalKey<ScaffoldState>();
+  final _searchController = TextEditingController();
+  final _money = NumberFormat('#,##0.00');
+
+  // Raw server records for the loaded range (all windows, de-duplicated later).
+  final List<dynamic> _server = [];
+  List<TxEntry> _entries = [];
+
+  late DateTime _from;
+  late DateTime _to;
+  _Period _period = _Period.days30;
+  TxFilter _filter = TxFilter.all;
+  String _query = '';
 
   bool _isLoading = false;
-  int _selectedFilterIndex = 1; // 0: 7 Days, 1: 30 Days, 2: Custom
-  String _selectedCategory = 'all';
-
-  static const List<Map<String, dynamic>> _categories = [
-    {'id': 'all', 'label': 'All', 'icon': Icons.tune_rounded},
-    {'id': 'transfer_in', 'label': 'Transfer In', 'icon': Icons.arrow_downward_rounded},
-    {'id': 'transfer_out', 'label': 'Transfer Out', 'icon': Icons.arrow_upward_rounded},
-    {'id': 'airtime', 'label': 'Airtime', 'icon': Icons.phone_android_rounded},
-    {'id': 'data', 'label': 'Data', 'icon': Icons.wifi_rounded},
-    {'id': 'bills', 'label': 'Bill Payment', 'icon': Icons.receipt_long_rounded},
-    {'id': 'reversal', 'label': 'Reversals', 'icon': Icons.undo_rounded},
-    {'id': 'fee', 'label': 'Stamp Duty & Fees', 'icon': Icons.receipt_long_rounded},
-  ];
+  bool _isLoadingMore = false;
+  String? _error;
+  DateTime? _lastUpdated;
+  int _requestId = 0;
 
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => TransactionHistoryModel());
-
-    // Default dates: last 30 days
-    _model.datePicked1 = DateTime.now().subtract(const Duration(days: 30));
-    _model.datePicked2 = DateTime.now();
-
-    FFAppState().fromdate = DateFormat('yyyy-MM-dd').format(_model.datePicked1!);
-    FFAppState().todate = DateFormat('yyyy-MM-dd').format(_model.datePicked2!);
-
-    // Fetch initial 30 days history once on load
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchTransactions(
-        fromDate: FFAppState().fromdate,
-        toDate: FFAppState().todate,
-      );
-    });
+    _setPeriod(_Period.days30, load: false);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reload());
   }
 
   @override
   void dispose() {
+    _searchController.dispose();
     _model.dispose();
     super.dispose();
   }
 
-  String _getEffectiveAccountNo() {
-    if (widget.accountno != null && widget.accountno!.trim().isNotEmpty) {
-      return widget.accountno!.trim();
-    }
-    return FFAppState().accountno.trim();
+  // ─────────────────────────── data ───────────────────────────
+
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+  static String _api(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+
+  String _account() {
+    final a = widget.accountno?.trim() ?? '';
+    return a.isNotEmpty ? a : FFAppState().accountno.trim();
   }
 
-  Future<void> _fetchTransactions({
-    required String fromDate,
-    required String toDate,
-  }) async {
-    final account = _getEffectiveAccountNo();
-    if (account.isEmpty) return;
-
-    if (mounted) {
-      setState(() {
-        _isLoading = true;
-      });
-    }
-
+  Future<String?> _token() async {
+    final existing = FFAppState().bsptoken;
+    if (existing.isNotEmpty) return existing;
     try {
-      final token = FFAppState().bsptoken.isNotEmpty
-          ? FFAppState().bsptoken
-          : 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJQYXlzcDEwMTAkaS5pIiwiaWF0IjoxNzcxNzk1NDgwLCJleHAiOjE3NzUzOTU0ODB9.z3jZyAUV1kOvQKD-Y7eXbMi2yhZNtuFObnWc63JoR7w';
-
-      final res = await WalletAsAServiceGroup.wallethistoryCall.call(
-        authToken: token,
-        accountno: account,
-        fromdate: fromDate,
-        todate: toDate,
-      );
-
-      final localTx = await LocalVaultService.getTransactions(limit: 100);
-
-      if (!mounted) return;
-
-      final historyData =
-          WalletAsAServiceGroup.wallethistoryCall.message(res.jsonBody ?? '');
-
-      final List<dynamic> combined = [];
-      final Set<String> seenRefs = {};
-      final Set<String> seenSignatures = {};
-
-      // 1. Add authoritative server transactions first
-      if (historyData != null) {
-        for (final item in historyData) {
-          final refId = (getJsonField(item, r'''$.referenceID''')?.toString() ?? '').trim();
-          final uniqueId = (getJsonField(item, r'''$.uniqueIdentifier''')?.toString() ?? '').trim();
-          final ref = (getJsonField(item, r'''$.reference''')?.toString() ??
-              getJsonField(item, r'''$.paymentReference''')?.toString() ??
-              '').trim();
-
-          final primaryKey = refId.isNotEmpty ? refId : (uniqueId.isNotEmpty ? uniqueId : ref);
-          if (primaryKey.isNotEmpty && seenRefs.contains(primaryKey)) continue;
-
-          if (refId.isNotEmpty) seenRefs.add(refId);
-          if (uniqueId.isNotEmpty) seenRefs.add(uniqueId);
-          if (ref.isNotEmpty) seenRefs.add(ref);
-
-          final amt = (getJsonField(item, r'''$.amount''') as num?)?.toDouble() ?? 0.0;
-          final dateStr = (getJsonField(item, r'''$.transactionDateString''')?.toString() ??
-              getJsonField(item, r'''$.transactionDate''')?.toString() ??
-              '').trim();
-          final narr = (getJsonField(item, r'''$.narration''')?.toString() ?? '').trim();
-
-          // Create composite signature to identify and avoid local duplication
-          final dateDay = dateStr.length >= 10 ? dateStr.substring(0, 10) : dateStr;
-          final narrSnip = narr.length >= 8 ? narr.substring(0, 8) : narr;
-          seenSignatures.add('${amt.toStringAsFixed(2)}_${dateDay}_$narrSnip');
-
-          combined.add(item);
-        }
+      final auth = await StreetauthCall.call();
+      final t = StreetauthCall.streettoken(auth.jsonBody);
+      if (t != null && t.isNotEmpty) {
+        FFAppState().bsptoken = t;
+        return t;
       }
-
-      // 2. Add local vault transactions ONLY if not already in server records (e.g. pending/failed/recent)
-      for (final t in localTx) {
-        final ref = (t['ref'] ?? '').toString().trim();
-        final amt = (t['amount'] as num?)?.toDouble() ?? 0.0;
-        final amtStr = amt.toStringAsFixed(2);
-        final dt = DateTime.fromMillisecondsSinceEpoch(
-            (t['timestamp'] as int?) ?? DateTime.now().millisecondsSinceEpoch);
-        final dateStr = DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
-        final dateDay = DateFormat('yyyy-MM-dd').format(dt);
-        final isCredit = t['type'] == 'credit';
-
-        final localNarr = (t['narration'] != null &&
-                t['narration'].toString().trim().isNotEmpty &&
-                t['narration'].toString().trim() != '-')
-            ? t['narration'].toString().trim()
-            : '';
-        final recipient = (t['recipient_name'] != null &&
-                t['recipient_name'].toString().trim().isNotEmpty &&
-                t['recipient_name'].toString().trim() != '-')
-            ? t['recipient_name'].toString().trim()
-            : '';
-        final cleanNarr = localNarr.isNotEmpty
-            ? localNarr
-            : (recipient.isNotEmpty
-                ? (isCredit ? 'Transfer from $recipient' : 'Transfer to $recipient')
-                : (isCredit ? 'Incoming Transfer' : 'Transfer Out'));
-
-        // Skip if already seen by ref
-        if (ref.isNotEmpty && seenRefs.contains(ref)) continue;
-
-        // Skip if composite signature matches an existing server item
-        final narrSnip = cleanNarr.length >= 8 ? cleanNarr.substring(0, 8) : cleanNarr;
-        final sig = '${amt.toStringAsFixed(2)}_${dateDay}_$narrSnip';
-        if (seenSignatures.contains(sig)) continue;
-
-        if (ref.isNotEmpty) seenRefs.add(ref);
-        seenSignatures.add(sig);
-
-        // Prepend local unsynced item
-        combined.insert(0, {
-          'reference': ref,
-          'referenceID': ref,
-          'uniqueIdentifier': ref,
-          'narration': cleanNarr,
-          'recipient_name': recipient,
-          'transactionDateString': dateStr,
-          'credit': isCredit ? amtStr : '',
-          'debit': isCredit ? '' : amtStr,
-          'amount': amt,
-          'status': t['status'] ?? 'Successful',
-          'isLocal': true,
-          'timestamp': (t['timestamp'] as int?) ?? 0,
-        });
-      }
-
-      FFAppState().transactionhistory = combined;
-    } catch (e) {
-      // Silently handle or keep current data
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
+    } catch (_) {}
+    return null;
   }
 
-  void _applyQuickFilter(int index) {
-    HapticFeedback.selectionClick();
+  /// Fetch one window (<= 30 days). Throws on failure so callers can report it.
+  Future<List<dynamic>> _fetchWindow(
+      String account, String token, DateTime from, DateTime to) async {
+    final res = await WalletAsAServiceGroup.wallethistoryCall.call(
+      authToken: token,
+      accountno: account,
+      fromdate: _api(from),
+      todate: _api(to),
+    );
+    if (!res.succeeded) {
+      throw Exception('HTTP ${res.statusCode}');
+    }
+    return WalletAsAServiceGroup.wallethistoryCall.message(res.jsonBody ?? '') ??
+        const [];
+  }
+
+  Future<void> _rebuildEntries() async {
+    List<Map<String, dynamic>> local = const [];
+    try {
+      local = await LocalVaultService.getTransactions(limit: 200);
+    } catch (_) {}
+    // Only keep unsynced local items that fall inside the visible range.
+    final start = _from.millisecondsSinceEpoch;
+    final end = _dateOnly(_to).add(const Duration(days: 1)).millisecondsSinceEpoch;
+    local = local.where((t) {
+      final ts = (t['timestamp'] as int?) ?? 0;
+      return ts >= start && ts < end;
+    }).toList();
+
+    final entries = TransactionHistoryService.merge(_server, local);
+    if (!mounted) return;
+    setState(() => _entries = entries);
+
+    // Home screen reads this for its "recent activity" strip.
+    FFAppState().transactionhistory =
+        entries.take(100).map((e) => e.raw).toList();
+  }
+
+  Future<void> _reload() async {
+    final account = _account();
+    if (account.isEmpty) {
+      setState(() => _error = 'No account selected.');
+      return;
+    }
+    final id = ++_requestId;
     setState(() {
-      _selectedFilterIndex = index;
+      _isLoading = true;
+      _error = null;
     });
 
+    final token = await _token();
+    if (token == null) {
+      if (!mounted || id != _requestId) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Your session has expired. Please log in again.';
+      });
+      return;
+    }
+
+    final fetched = <dynamic>[];
+    var failed = 0;
+    var cursor = _from;
+    var windows = 0;
+    while (!cursor.isAfter(_to) && windows < _kMaxWindowsPerLoad) {
+      var end = cursor.add(const Duration(days: _kWindowDays - 1));
+      if (end.isAfter(_to)) end = _to;
+      try {
+        fetched.addAll(await _fetchWindow(account, token, cursor, end));
+      } catch (_) {
+        failed++;
+      }
+      if (!mounted || id != _requestId) return; // a newer request took over
+      cursor = end.add(const Duration(days: 1));
+      windows++;
+    }
+
+    _server
+      ..clear()
+      ..addAll(fetched);
+    await _rebuildEntries();
+    if (!mounted || id != _requestId) return;
+    setState(() {
+      _isLoading = false;
+      if (failed > 0) {
+        _error = fetched.isEmpty
+            ? "Couldn't load your transactions."
+            : 'Some transactions could not be loaded.';
+      } else {
+        _lastUpdated = DateTime.now();
+      }
+    });
+  }
+
+  Future<void> _loadEarlier() async {
+    if (_isLoadingMore || _isLoading) return;
+    final account = _account();
+    final token = await _token();
+    if (account.isEmpty || token == null) return;
+
+    setState(() => _isLoadingMore = true);
+    final newFrom = _from.subtract(const Duration(days: _kWindowDays));
+    final windowEnd = _from.subtract(const Duration(days: 1));
+    try {
+      final items = await _fetchWindow(account, token, newFrom, windowEnd);
+      _server.addAll(items);
+      _from = newFrom;
+      _period = _Period.custom;
+      await _rebuildEntries();
+      if (mounted && items.isEmpty) {
+        _toast('No activity between ${DateFormat('d MMM').format(newFrom)} and '
+            '${DateFormat('d MMM yyyy').format(windowEnd)}.');
+      }
+    } catch (_) {
+      _toast("Couldn't load earlier transactions. Try again.");
+    } finally {
+      if (mounted) setState(() => _isLoadingMore = false);
+    }
+  }
+
+  void _setPeriod(_Period p, {bool load = true}) {
+    final today = _dateOnly(DateTime.now());
+    final days = switch (p) {
+      _Period.days7 => 7,
+      _Period.days30 => 30,
+      _Period.days90 => 90,
+      _Period.custom => 0,
+    };
+    setState(() {
+      _period = p;
+      if (p != _Period.custom) {
+        _to = today;
+        _from = today.subtract(Duration(days: days));
+      }
+    });
+    FFAppState().fromdate = _api(_from);
+    FFAppState().todate = _api(_to);
+    if (load) _reload();
+  }
+
+  Future<void> _pickCustomRange() async {
     final now = DateTime.now();
-    if (index == 0) {
-      // 7 Days
-      _model.datePicked1 = now.subtract(const Duration(days: 7));
-      _model.datePicked2 = now;
-    } else if (index == 1) {
-      // 30 Days
-      _model.datePicked1 = now.subtract(const Duration(days: 30));
-      _model.datePicked2 = now;
-    }
-
-    if (index == 0 || index == 1) {
-      final fromStr = DateFormat('yyyy-MM-dd').format(_model.datePicked1!);
-      final toStr = DateFormat('yyyy-MM-dd').format(_model.datePicked2!);
-      FFAppState().fromdate = fromStr;
-      FFAppState().todate = toStr;
-      _fetchTransactions(fromDate: fromStr, toDate: toStr);
-    }
-  }
-
-  Future<void> _selectFromDate() async {
-    final picked = await showDatePicker(
+    final picked = await showDateRangePicker(
       context: context,
-      initialDate: _model.datePicked1 ?? DateTime.now().subtract(const Duration(days: 30)),
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return wrapInMaterialDatePickerTheme(
-          context,
-          child!,
-          headerBackgroundColor: const Color(0xFF00A651),
-          headerForegroundColor: Colors.white,
-          headerTextStyle: GoogleFonts.inter(
-            fontSize: 24.0,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-          pickerBackgroundColor: Colors.white,
-          pickerForegroundColor: const Color(0xFF1F2937),
-          selectedDateTimeBackgroundColor: const Color(0xFF00A651),
-          selectedDateTimeForegroundColor: Colors.white,
-          actionButtonForegroundColor: const Color(0xFF00A651),
-          iconSize: 24.0,
-        );
-      },
-    );
-
-    if (picked != null && mounted) {
-      setState(() {
-        _model.datePicked1 = picked;
-        _selectedFilterIndex = 2; // Custom
-      });
-      FFAppState().fromdate = DateFormat('yyyy-MM-dd').format(picked);
-    }
-  }
-
-  Future<void> _selectToDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _model.datePicked2 ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return wrapInMaterialDatePickerTheme(
-          context,
-          child!,
-          headerBackgroundColor: const Color(0xFF00A651),
-          headerForegroundColor: Colors.white,
-          headerTextStyle: GoogleFonts.inter(
-            fontSize: 24.0,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-          pickerBackgroundColor: Colors.white,
-          pickerForegroundColor: const Color(0xFF1F2937),
-          selectedDateTimeBackgroundColor: const Color(0xFF00A651),
-          selectedDateTimeForegroundColor: Colors.white,
-          actionButtonForegroundColor: const Color(0xFF00A651),
-          iconSize: 24.0,
-        );
-      },
-    );
-
-    if (picked != null && mounted) {
-      setState(() {
-        _model.datePicked2 = picked;
-        _selectedFilterIndex = 2; // Custom
-      });
-      FFAppState().todate = DateFormat('yyyy-MM-dd').format(picked);
-    }
-  }
-
-  void _onSearchPressed() {
-    HapticFeedback.lightImpact();
-    if (_model.datePicked1 == null || _model.datePicked2 == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select both From and To dates.'),
-          backgroundColor: Color(0xFFE53935),
+      lastDate: now,
+      initialDateRange: DateTimeRange(start: _from, end: _to),
+      helpText: 'Select period',
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: Theme.of(context).colorScheme.copyWith(
+                primary: _C.green,
+                onPrimary: Colors.white,
+              ),
         ),
-      );
-      return;
-    }
-
-    if (_model.datePicked1!.isAfter(_model.datePicked2!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('"From Date" cannot be after "To Date".'),
-          backgroundColor: Color(0xFFE53935),
-        ),
-      );
-      return;
-    }
-
-    final diff = _model.datePicked2!.difference(_model.datePicked1!).inDays;
-    if (diff > 30) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Date range must be within 30 days.'),
-          backgroundColor: Color(0xFFE53935),
-        ),
-      );
-      return;
-    }
-
-    final fromStr = DateFormat('yyyy-MM-dd').format(_model.datePicked1!);
-    final toStr = DateFormat('yyyy-MM-dd').format(_model.datePicked2!);
-    FFAppState().fromdate = fromStr;
-    FFAppState().todate = toStr;
-
-    _fetchTransactions(fromDate: fromStr, toDate: toStr);
-  }
-
-  bool _matchesCategory(dynamic item, String category) {
-    if (category == 'all') return true;
-    final parsed = TransactionParserService.parse(item);
-    switch (category) {
-      case 'transfer_in':
-        return parsed.isCredit && !parsed.isReversalCredit && parsed.category != 'fee';
-      case 'transfer_out':
-        return !parsed.isCredit && !parsed.isReversed && parsed.category == 'transfer_out';
-      case 'airtime':
-        return parsed.category == 'airtime';
-      case 'data':
-        return parsed.category == 'data';
-      case 'bills':
-      case 'bill_payment':
-      case 'electricity':
-        return parsed.category == 'bill_payment' || parsed.category == 'electricity';
-      case 'reversal':
-        return parsed.isReversed || parsed.isReversalCredit || parsed.category == 'reversal';
-      case 'fee':
-        return parsed.category == 'fee';
-      default:
-        return true;
-    }
-  }
-
-  int _getCategoryCount(List<dynamic> list, String category) {
-    if (category == 'all') return list.length;
-    return list.where((item) => _matchesCategory(item, category)).length;
-  }
-
-  String _getCategoryDisplayName(String category) {
-    final match = _categories.firstWhere(
-      (c) => c['id'] == category,
-      orElse: () => {'label': 'Transactions'},
+        child: child!,
+      ),
     );
-    return match['label'] as String;
+    if (picked == null || !mounted) return;
+    var from = _dateOnly(picked.start);
+    final to = _dateOnly(picked.end);
+    final maxSpan = _kWindowDays * _kMaxWindowsPerLoad;
+    if (to.difference(from).inDays > maxSpan) {
+      from = to.subtract(const Duration(days: 365));
+      _toast('Showing the last 12 months of that range.');
+    }
+    setState(() {
+      _from = from;
+      _to = to;
+    });
+    _setPeriod(_Period.custom);
   }
 
-  Widget _buildFilterChip(String label, int index) {
-    final isSelected = _selectedFilterIndex == index;
-    return Material(
-      color: Colors.transparent,
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ─────────────────────────── UI pieces ───────────────────────────
+
+  String get _periodLabel {
+    final f = DateFormat('d MMM');
+    final fy = DateFormat('d MMM yyyy');
+    return '${f.format(_from)} – ${fy.format(_to)}';
+  }
+
+  static const _filterLabels = {
+    TxFilter.all: 'All',
+    TxFilter.moneyIn: 'Money in',
+    TxFilter.moneyOut: 'Money out',
+    TxFilter.billsAirtime: 'Bills & airtime',
+    TxFilter.issues: 'Failed & reversed',
+  };
+
+  Widget _pill({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    int? count,
+    IconData? icon,
+  }) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: count == null ? label : '$label, $count',
+      excludeSemantics: true,
       child: InkWell(
-        onTap: () => _applyQuickFilter(index),
-        borderRadius: BorderRadius.circular(20.0),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(24),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 7.0),
+          constraints: const BoxConstraints(minHeight: 40),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF00A651) : Colors.white,
-            borderRadius: BorderRadius.circular(20.0),
-            border: Border.all(
-              color: isSelected ? const Color(0xFF00A651) : const Color(0xFFE5E7EB),
-            ),
+            color: selected ? _C.green : Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: selected ? _C.green : _C.line),
           ),
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12.0,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              color: isSelected ? Colors.white : const Color(0xFF4B5563),
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: selected ? Colors.white : _C.muted),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? Colors.white : const Color(0xFF374151),
+                ),
+              ),
+              if (count != null && count > 0 && !selected) ...[
+                const SizedBox(width: 6),
+                Text(
+                  '$count',
+                  style: GoogleFonts.inter(
+                      fontSize: 11, fontWeight: FontWeight.w700, color: _C.muted),
+                ),
+              ],
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildLoadingSkeleton() {
-    return Column(
-      children: List.generate(4, (index) {
-        return Container(
-          width: double.infinity,
-          height: 68.0,
-          margin: const EdgeInsets.only(bottom: 10.0),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14.0),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
+  Widget _summaryCard(TxTotals t) {
+    Widget cell(String label, double v, Color color, IconData icon) => Expanded(
           child: Row(
             children: [
               Container(
-                width: 38.0,
-                height: 38.0,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF3F4F6),
-                  borderRadius: BorderRadius.circular(11.0),
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                child: Icon(icon, size: 18, color: color),
               ),
-              const SizedBox(width: 12.0),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      width: 130.0,
-                      height: 13.0,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(4.0),
-                      ),
-                    ),
-                    const SizedBox(height: 6.0),
-                    Container(
-                      width: 90.0,
-                      height: 10.0,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(4.0),
-                      ),
+                    Text(label,
+                        style: GoogleFonts.inter(
+                            fontSize: 12, color: _C.muted, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text('₦${_money.format(v)}',
+                          style: GoogleFonts.inter(
+                              fontSize: 16, fontWeight: FontWeight.w800, color: _C.ink)),
                     ),
                   ],
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 65.0,
-                    height: 14.0,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(4.0),
-                    ),
-                  ),
-                  const SizedBox(height: 6.0),
-                  Container(
-                    width: 45.0,
-                    height: 10.0,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(4.0),
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         );
-      }),
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _C.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_periodLabel,
+              style: GoogleFonts.inter(
+                  fontSize: 12, color: _C.muted, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              cell('Money in', t.moneyIn, _C.green, Icons.south_west_rounded),
+              const SizedBox(width: 12),
+              cell('Money out', t.moneyOut, _C.ink, Icons.north_east_rounded),
+            ],
+          ),
+        ],
+      ),
     );
   }
+
+  Widget _searchField() {
+    return TextField(
+      controller: _searchController,
+      onChanged: (v) => setState(() => _query = v),
+      textInputAction: TextInputAction.search,
+      style: GoogleFonts.inter(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'Search name, amount or reference',
+        hintStyle: GoogleFonts.inter(fontSize: 14, color: _C.muted),
+        prefixIcon: const Icon(Icons.search_rounded, color: _C.muted),
+        suffixIcon: _query.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear search',
+                icon: const Icon(Icons.close_rounded, color: _C.muted),
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _query = '');
+                },
+              ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _C.line),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _C.green, width: 1.5),
+        ),
+      ),
+    );
+  }
+
+  Widget _periodRow() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _pill(label: '7 days', selected: _period == _Period.days7, onTap: () => _setPeriod(_Period.days7)),
+          const SizedBox(width: 8),
+          _pill(label: '30 days', selected: _period == _Period.days30, onTap: () => _setPeriod(_Period.days30)),
+          const SizedBox(width: 8),
+          _pill(label: '90 days', selected: _period == _Period.days90, onTap: () => _setPeriod(_Period.days90)),
+          const SizedBox(width: 8),
+          _pill(
+            label: _period == _Period.custom ? _periodLabel : 'Custom',
+            icon: Icons.calendar_today_rounded,
+            selected: _period == _Period.custom,
+            onTap: _pickCustomRange,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterRow() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: TxFilter.values.map((f) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _pill(
+              label: _filterLabels[f]!,
+              selected: _filter == f,
+              count: f == TxFilter.all ? null : TransactionHistoryService.count(_entries, f),
+              onTap: () => setState(() => _filter = f),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _errorBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: _C.red, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(_error!,
+                style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF991B1B))),
+          ),
+          TextButton(
+            onPressed: _isLoading ? null : _reload,
+            child: Text('Retry',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: _C.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayHeader(TxDayGroup g) {
+    final net = g.net;
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 8, left: 2, right: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text(g.label,
+                  style: GoogleFonts.inter(
+                      fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF374151))),
+            ),
+          ),
+          if (net != 0)
+            Text(
+              '${net > 0 ? '+' : '−'}₦${_money.format(net.abs())}',
+              style: GoogleFonts.inter(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: _C.muted),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _skeleton() {
+    return Column(
+      children: List.generate(
+        5,
+        (_) => Container(
+          height: 66,
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _C.line),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _empty(bool filtered) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(color: _C.line, shape: BoxShape.circle),
+            child: const Icon(Icons.receipt_long_outlined, size: 30, color: Color(0xFF9CA3AF)),
+          ),
+          const SizedBox(height: 14),
+          Text(filtered ? 'No matching transactions' : 'No transactions yet',
+              style: GoogleFonts.inter(
+                  fontSize: 15, fontWeight: FontWeight.w700, color: const Color(0xFF374151))),
+          const SizedBox(height: 6),
+          Text(
+            filtered
+                ? 'Try a different filter or search.'
+                : 'Nothing was recorded between $_periodLabel.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(fontSize: 13, color: _C.muted),
+          ),
+          if (!filtered) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _isLoadingMore ? null : _loadEarlier,
+              child: const Text('Look further back'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _footer() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        children: [
+          if (_lastUpdated != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Updated ${DateFormat('h:mm a').format(_lastUpdated!)}',
+                style: GoogleFonts.inter(fontSize: 11, color: _C.muted),
+              ),
+            ),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: _isLoadingMore ? null : _loadEarlier,
+              icon: _isLoadingMore
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _C.green))
+                  : const Icon(Icons.history_rounded, size: 18, color: _C.green),
+              label: Text('Load earlier transactions',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: _C.green)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: _C.green),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────── build ───────────────────────────
 
   @override
   Widget build(BuildContext context) {
     context.watch<FFAppState>();
 
-    final translist = FFAppState().transactionhistory.toList();
+    final visible =
+        TransactionHistoryService.apply(_entries, _filter, _query);
+    final totals = TransactionHistoryService.totals(visible);
+    final groups = TransactionHistoryService.groupByDay(visible);
+    final isFiltered = _filter != TxFilter.all || _query.trim().isNotEmpty;
 
-    // Compute totals safely
-    final creditStrings = translist
-        .map((e) => getJsonField(e, r'''$.credit''')?.toString() ?? '')
-        .toList();
-    final totalCredit = functions.sumalltran(creditStrings);
-
-    final debitStrings = translist
-        .map((e) => getJsonField(e, r'''$.debit''')?.toString() ?? '')
-        .toList();
-    final totalDebit = functions.sumalltran(debitStrings);
-
-    final fromDateLabel = _model.datePicked1 != null
-        ? DateFormat('MMM dd, yyyy').format(_model.datePicked1!)
-        : 'From Date';
-    final toDateLabel = _model.datePicked2 != null
-        ? DateFormat('MMM dd, yyyy').format(_model.datePicked2!)
-        : 'To Date';
-
-    // Apply category filtering
-    final filteredList = translist
-        .where((item) => _matchesCategory(item, _selectedCategory))
-        .toList();
+    // Flatten day headers and rows so a lazy builder can render them.
+    final rows = <Object>[];
+    for (final g in groups) {
+      rows.add(g);
+      rows.addAll(g.entries);
+    }
 
     return GestureDetector(
-      onTap: () {
-        FocusScope.of(context).unfocus();
-        FocusManager.instance.primaryFocus?.unfocus();
-      },
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       child: Scaffold(
         key: scaffoldKey,
-        backgroundColor: const Color(0xFFF7F9F7),
+        backgroundColor: _C.bg,
         appBar: AppBar(
-          backgroundColor: const Color(0xFF00A651),
+          backgroundColor: _C.green,
           automaticallyImplyLeading: false,
           elevation: 0,
           leading: FlutterFlowIconButton(
@@ -551,47 +672,25 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
             borderRadius: 30.0,
             borderWidth: 1.0,
             buttonSize: 48.0,
-            icon: const Icon(
-              Icons.arrow_back_rounded,
-              color: Colors.white,
-              size: 22.0,
-            ),
-            onPressed: () async {
-              context.pop();
-            },
+            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22.0),
+            onPressed: () async => context.pop(),
           ),
-          title: Text(
-            'Transactions',
-            style: GoogleFonts.inter(
-              color: Colors.white,
-              fontSize: 18.0,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
+          title: Text('Transactions',
+              style: GoogleFonts.inter(
+                  color: Colors.white, fontSize: 18.0, fontWeight: FontWeight.w700)),
           centerTitle: true,
           actions: [
             IconButton(
+              tooltip: 'Refresh',
               icon: _isLoading
                   ? const SizedBox(
-                      width: 18.0,
-                      height: 18.0,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2.0,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.refresh_rounded, color: Colors.white, size: 22.0),
-              onPressed: _isLoading
-                  ? null
-                  : () {
-                      final fromStr = _model.datePicked1 != null
-                          ? DateFormat('yyyy-MM-dd').format(_model.datePicked1!)
-                          : functions.subtractDaysFromToday(30);
-                      final toStr = _model.datePicked2 != null
-                          ? DateFormat('yyyy-MM-dd').format(_model.datePicked2!)
-                          : DateFormat('yyyy-MM-dd').format(DateTime.now());
-                      _fetchTransactions(fromDate: fromStr, toDate: toStr);
-                    },
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+                  : const Icon(Icons.refresh_rounded, color: Colors.white, size: 22),
+              onPressed: _isLoading ? null : _reload,
             ),
           ],
         ),
@@ -600,412 +699,65 @@ class _TransactionHistoryWidgetState extends State<TransactionHistoryWidget> {
           child: Stack(
             children: [
               RefreshIndicator(
-                color: const Color(0xFF00A651),
-                onRefresh: () async {
-                  final fromStr = _model.datePicked1 != null
-                      ? DateFormat('yyyy-MM-dd').format(_model.datePicked1!)
-                      : functions.subtractDaysFromToday(30);
-                  final toStr = _model.datePicked2 != null
-                      ? DateFormat('yyyy-MM-dd').format(_model.datePicked2!)
-                      : DateFormat('yyyy-MM-dd').format(DateTime.now());
-                  await _fetchTransactions(fromDate: fromStr, toDate: toStr);
-                },
-                child: SingleChildScrollView(
+                color: _C.green,
+                onRefresh: _reload,
+                child: ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.only(
-                    left: 16.0,
-                    right: 16.0,
-                    top: 16.0,
-                    bottom: 100.0, // Space for BottomAppBar
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Overview Cards (Incoming & Outgoing totals)
-                      Row(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
+                  // header + body rows + footer
+                  itemCount: 1 + (_isLoading && _entries.isEmpty ? 1 : (rows.isEmpty ? 1 : rows.length)) + (rows.isEmpty ? 0 : 1),
+                  itemBuilder: (context, i) {
+                    if (i == 0) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(
-                            child: OverviewCardWidget(
-                              totalAmount: totalCredit,
-                            ),
-                          ),
-                          const SizedBox(width: 10.0),
-                          Expanded(
-                            child: OverviewCarddebitWidget(
-                              totalAmount: totalDebit,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16.0),
-
-                      // Filter Section Header & Quick Chips
-                      Row(
-                        children: [
-                          Text(
-                            'Period',
-                            style: GoogleFonts.inter(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.bold,
-                              color: const Color(0xFF1F2937),
-                            ),
-                          ),
-                          const Spacer(),
-                          _buildFilterChip('7 Days', 0),
-                          const SizedBox(width: 8.0),
-                          _buildFilterChip('30 Days', 1),
-                        ],
-                      ),
-                      const SizedBox(height: 12.0),
-
-                      // Date Pickers and Search Button Row
-                      Container(
-                        padding: const EdgeInsets.all(12.0),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14.0),
-                          border: Border.all(color: const Color(0xFFE5E7EB)),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                // From Date
-                                Expanded(
-                                  child: InkWell(
-                                    onTap: _selectFromDate,
-                                    borderRadius: BorderRadius.circular(8.0),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10.0,
-                                        vertical: 9.0,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF9FAFB),
-                                        borderRadius: BorderRadius.circular(8.0),
-                                        border: Border.all(color: const Color(0xFFD1D5DB)),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.calendar_today_rounded,
-                                            size: 15.0,
-                                            color: Color(0xFF00A651),
-                                          ),
-                                          const SizedBox(width: 6.0),
-                                          Expanded(
-                                            child: Text(
-                                              fromDateLabel,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: GoogleFonts.inter(
-                                                fontSize: 11.5,
-                                                fontWeight: FontWeight.w600,
-                                                color: const Color(0xFF1F2937),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 6.0),
-                                  child: Text('–', style: TextStyle(color: Color(0xFF9CA3AF), fontWeight: FontWeight.bold)),
-                                ),
-                                // To Date
-                                Expanded(
-                                  child: InkWell(
-                                    onTap: _selectToDate,
-                                    borderRadius: BorderRadius.circular(8.0),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10.0,
-                                        vertical: 9.0,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF9FAFB),
-                                        borderRadius: BorderRadius.circular(8.0),
-                                        border: Border.all(color: const Color(0xFFD1D5DB)),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.calendar_today_rounded,
-                                            size: 15.0,
-                                            color: Color(0xFF00A651),
-                                          ),
-                                          const SizedBox(width: 6.0),
-                                          Expanded(
-                                            child: Text(
-                                              toDateLabel,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: GoogleFonts.inter(
-                                                fontSize: 11.5,
-                                                fontWeight: FontWeight.w600,
-                                                color: const Color(0xFF1F2937),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10.0),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 38.0,
-                              child: ElevatedButton.icon(
-                                onPressed: _isLoading ? null : _onSearchPressed,
-                                icon: const Icon(Icons.search_rounded, size: 17.0, color: Colors.white),
-                                label: Text(
-                                  'Filter Range',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13.0,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF00A651),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8.0),
-                                  ),
-                                ),
-                              ),
-                            ),
+                          _summaryCard(totals),
+                          const SizedBox(height: 14),
+                          _searchField(),
+                          const SizedBox(height: 12),
+                          _periodRow(),
+                          const SizedBox(height: 10),
+                          _filterRow(),
+                          const SizedBox(height: 4),
+                          if (_error != null) ...[
+                            const SizedBox(height: 12),
+                            _errorBanner(),
                           ],
-                        ),
-                      ),
-                      const SizedBox(height: 16.0),
-
-                      // Multi-Category Filter Chips (Horizontally Scrollable)
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        child: Row(
-                          children: _categories.map((cat) {
-                            final catId = cat['id'] as String;
-                            final isSelected = _selectedCategory == catId;
-                            final count = _getCategoryCount(translist, catId);
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: () {
-                                    HapticFeedback.selectionClick();
-                                    setState(() {
-                                      _selectedCategory = catId;
-                                    });
-                                  },
-                                  borderRadius: BorderRadius.circular(20.0),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 180),
-                                    padding: const EdgeInsets.symmetric(horizontal: 13.0, vertical: 7.5),
-                                    decoration: BoxDecoration(
-                                      color: isSelected ? const Color(0xFF00A651) : Colors.white,
-                                      borderRadius: BorderRadius.circular(20.0),
-                                      border: Border.all(
-                                        color: isSelected ? const Color(0xFF00A651) : const Color(0xFFE5E7EB),
-                                        width: isSelected ? 1.5 : 1.0,
-                                      ),
-                                      boxShadow: isSelected
-                                          ? [
-                                              BoxShadow(
-                                                color: const Color(0xFF00A651).withValues(alpha: 0.22),
-                                                blurRadius: 8.0,
-                                                offset: const Offset(0.0, 2.0),
-                                              ),
-                                            ]
-                                          : null,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          cat['icon'] as IconData,
-                                          size: 14.5,
-                                          color: isSelected ? Colors.white : const Color(0xFF4B5563),
-                                        ),
-                                        const SizedBox(width: 6.0),
-                                        Text(
-                                          cat['label'] as String,
-                                          style: GoogleFonts.inter(
-                                            fontSize: 12.0,
-                                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                            color: isSelected ? Colors.white : const Color(0xFF374151),
-                                          ),
-                                        ),
-                                        if (count > 0 && !isSelected) ...[
-                                          const SizedBox(width: 6.0),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 1.5),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFFF3F4F6),
-                                              borderRadius: BorderRadius.circular(10.0),
-                                            ),
-                                            child: Text(
-                                              '$count',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 10.0,
-                                                fontWeight: FontWeight.w700,
-                                                color: const Color(0xFF6B7280),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                      const SizedBox(height: 18.0),
-
-                      // Section Title: History & Count
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _selectedCategory == 'all'
-                                ? 'Activity History'
-                                : _getCategoryDisplayName(_selectedCategory),
-                            style: GoogleFonts.inter(
-                              fontSize: 15.0,
-                              fontWeight: FontWeight.bold,
-                              color: const Color(0xFF111827),
-                            ),
-                          ),
-                          if (!_isLoading && translist.isNotEmpty)
-                            Text(
-                              _selectedCategory == 'all'
-                                  ? '${translist.length} transactions'
-                                  : '${filteredList.length} of ${translist.length}',
-                              style: GoogleFonts.inter(
-                                fontSize: 12.0,
-                                fontWeight: FontWeight.w500,
-                                color: const Color(0xFF6B7280),
-                              ),
-                            ),
                         ],
+                      );
+                    }
+                    if (_isLoading && _entries.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 18),
+                        child: _skeleton(),
+                      );
+                    }
+                    if (rows.isEmpty) {
+                      return _error != null && _entries.isEmpty
+                          ? const SizedBox.shrink()
+                          : _empty(isFiltered);
+                    }
+                    if (i - 1 == rows.length) return _footer();
+                    final row = rows[i - 1];
+                    if (row is TxDayGroup) return _dayHeader(row);
+                    final e = row as TxEntry;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TransactionCardWidget(
+                        key: ValueKey(e.key),
+                        credittitle: e.parsed.title,
+                        creditsubtitle: e.parsed.dateString,
+                        creditamount: e.parsed.isCredit ? e.parsed.amount.toString() : '',
+                        debittitle: e.parsed.title,
+                        debitamount: e.parsed.isCredit ? '' : e.parsed.amount.toString(),
+                        debitsubtitle: e.parsed.dateString,
+                        rawItem: e.raw,
+                        compactSubtitle: true,
                       ),
-                      const SizedBox(height: 12.0),
-
-                      // Transactions List State
-                      if (_isLoading)
-                        _buildLoadingSkeleton()
-                      else if (filteredList.isEmpty)
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 40.0),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 64.0,
-                                  height: 64.0,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFE5E7EB),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: const Icon(
-                                    Icons.receipt_long_outlined,
-                                    size: 32.0,
-                                    color: Color(0xFF9CA3AF),
-                                  ),
-                                ),
-                                const SizedBox(height: 14.0),
-                                Text(
-                                  _selectedCategory == 'all'
-                                      ? 'No Transactions Found'
-                                      : 'No ${_getCategoryDisplayName(_selectedCategory)}',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 15.0,
-                                    fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF374151),
-                                  ),
-                                ),
-                                const SizedBox(height: 6.0),
-                                Text(
-                                  _selectedCategory == 'all'
-                                      ? 'No activity recorded for the selected period.'
-                                      : 'No activity found matching the selected filter.',
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 12.5,
-                                    color: const Color(0xFF6B7280),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      else
-                        ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: filteredList.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 8.0),
-                          itemBuilder: (context, index) {
-                            final item = filteredList[index];
-                            final narration = getJsonField(
-                                  item,
-                                  r'''$.narration''',
-                                )?.toString() ??
-                                '';
-                            final dateStr = getJsonField(
-                                  item,
-                                  r'''$.transactionDateString''',
-                                )?.toString() ??
-                                '';
-                            final credit = getJsonField(
-                                  item,
-                                  r'''$.credit''',
-                                )?.toString() ??
-                                '';
-                            final debit = getJsonField(
-                                  item,
-                                  r'''$.debit''',
-                                )?.toString() ??
-                                '';
-
-                            final cleanTitle = functions
-                                .processTransactionNarration(narration);
-
-                            final refKey = getJsonField(item, r'''$.referenceID''') ??
-                                getJsonField(item, r'''$.uniqueIdentifier''') ??
-                                getJsonField(item, r'''$.reference''') ??
-                                'tx_$index';
-
-                            return TransactionCardWidget(
-                              key: ValueKey('${refKey}_$index'),
-                              credittitle: cleanTitle,
-                              creditsubtitle: dateStr,
-                              creditamount: credit,
-                              debittitle: cleanTitle,
-                              debitamount: debit,
-                              debitsubtitle: dateStr,
-                              rawItem: item,
-                            );
-                          },
-                        ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
-
-              // Fixed Bottom Navigation Bar (Activity tab selected = index 3)
               const BottomAppBarWidget(selectedIndex: 3),
             ],
           ),
