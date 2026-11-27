@@ -48,18 +48,66 @@ workflows:
         submit_to_testflight: true
 
   generate-screenshots:
-    name: Generate App Store Screenshots
+    name: Generate Real iOS Simulator Screenshots
     instance_type: mac_mini_m2
-    max_build_duration: 30
+    max_build_duration: 45
     working_directory: streetpay
     environment:
       flutter: 3.41.9
       xcode: latest
+      cocoapods: default
     scripts:
-      - name: Install Python dependencies
+      - name: Get Flutter packages & CocoaPods
+        script: |
+          flutter pub get
+          cd ios && pod install && cd ..
+      - name: Install Python Pillow
         script: pip3 install pillow
-      - name: Generate App Store Screenshots
-        script: python3 ../scripts/generate_screenshots.py
+      - name: Capture Real iOS Simulator Screenshots
+        script: |
+          capture_sim() {
+            local LABEL="$1"
+            shift
+            local UDID=""
+            for NAME in "$@"; do
+              UDID=$(xcrun simctl list devices available | grep -F "$NAME (" | grep -oE '[0-9A-F-]{36}' | head -n 1 || true)
+              if [ -n "$UDID" ]; then
+                echo "Found simulator '$NAME' ($UDID) for $LABEL"
+                break
+              fi
+            done
+            if [ -z "$UDID" ]; then
+              echo "No matching simulator found for $LABEL"
+              return 0
+            fi
+
+            xcrun simctl boot "$UDID" || true
+            xcrun simctl bootstatus "$UDID" -b
+            xcrun simctl status_bar "$UDID" override \
+              --time "9:41" \
+              --dataNetwork wifi \
+              --wifiMode active \
+              --wifiBars 3 \
+              --cellularMode active \
+              --cellularBars 4 \
+              --batteryState charged \
+              --batteryLevel 100 || true
+
+            SCREENSHOT_DIR="../screenshots/$LABEL" flutter drive \
+              --driver=test_driver/integration_test.dart \
+              --target=integration_test/screenshots_test.dart \
+              -d "$UDID" \
+              --no-pub || true
+
+            xcrun simctl shutdown "$UDID" || true
+          }
+
+          xcrun simctl list devices available
+          capture_sim "sim_6.9" "iPhone 16 Pro Max" "iPhone 17 Pro Max" "iPhone 15 Pro Max"
+          capture_sim "sim_6.3" "iPhone 16 Pro" "iPhone 17 Pro" "iPhone 16" "iPhone 15 Pro"
+          capture_sim "sim_ipad" "iPad Pro 13-inch (M4)" "iPad Pro 13-inch" "iPad Pro (12.9-inch)" "iPad Air 13-inch"
+      - name: Normalize to all App Store Connect display sizes
+        script: python3 ../scripts/normalize_sim_screenshots.py
     artifacts:
       - ../screenshots/**/*.png
       - screenshots/**/*.png
